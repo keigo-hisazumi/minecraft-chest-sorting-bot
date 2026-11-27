@@ -208,15 +208,17 @@ class SortController {
         if (!unchanged || (signature.retry && ++polls >= RETRY_POLLS)) {
           const result = await this.sorter.sortOnce({
             ...context,
-            saveAssignments: (assignments) => this.store.set(key, { ...this.store.get(key), assignments })
+            saveAssignments: (assignments) => this.store.set(key, { ...this.store.get(key), assignments }),
+            saveReplant: (replant) => this.store.set(key, { ...this.store.get(key), replant })
           })
-          const unfinished = result.failed.length > 0 || (result.build?.problems.length ?? 0) > 0
+          const { problems = [], pendingReplant = 0, expanded = 0, created = 0, trees = 0, planted = 0 } = result.build ?? {}
+          const unfinished = result.failed.length > 0 || problems.length > 0 || pendingReplant > 0
           signature = { value: result.signature, retry: unfinished }
           polls = 0
           const lines = formatResult(result)
-          const placed = (result.build?.expanded ?? 0) + (result.build?.created ?? 0)
-          // 何も移さず置かず、前回と同じ内容なら、繰り返して知らせない
-          if (result.delivered > 0 || placed > 0 || lines.join('\n') !== reported) tell(lines)
+          // 何も移さず作業もせず、前回と同じ内容なら、繰り返して知らせない
+          const worked = result.delivered + expanded + created + trees + planted > 0
+          if (worked || lines.join('\n') !== reported) tell(lines)
           reported = lines.join('\n')
         }
       } catch (err) {

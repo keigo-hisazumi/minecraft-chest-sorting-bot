@@ -80,7 +80,20 @@ function formatDetail(plan, failed) {
  */
 function formatResult(result) {
   const lines = [result.delivered > 0 ? `整理しました: ${result.delivered} 個を移しました` : '移せるアイテムはありません']
-  const { expanded = 0, created = 0, tablePlaced = false, problems = [] } = result.build ?? {}
+  const {
+    expanded = 0,
+    created = 0,
+    tablePlaced = false,
+    trees = 0,
+    logs = 0,
+    planted = 0,
+    pendingReplant = 0,
+    notes = [],
+    problems = []
+  } = result.build ?? {}
+  if (trees > 0 || planted > 0) lines.push(`木を ${trees} 本伐採して原木 ${logs} 個を集め、苗木を ${planted} 個植えました`)
+  if (pendingReplant > 0) lines.push(`苗木がないなどで、植え直せていない場所が ${pendingReplant} か所あります`)
+  lines.push(...notes)
   const done = [
     ...(created > 0 ? [`大きなチェストを ${created} 個置きました`] : []),
     ...(expanded > 0 ? [`単体チェストを ${expanded} 個広げました`] : []),

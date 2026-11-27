@@ -7,6 +7,8 @@ const { synchronize, clearCursor, moveStack, readCargo, emptyCargoSlots } = requ
 const RESULT_SLOT = 0
 // BOT のインベントリの画面にある、2×2 の材料の枠
 const INVENTORY_GRID = [1, 2, 3, 4]
+// 作業台の画面にある、3×3 の材料の枠
+const TABLE_GRID = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 // 作業台の画面で、チェストの材料を置く枠（中央の 5 は空ける）
 const CHEST_PATTERN = [1, 2, 3, 4, 6, 7, 8, 9]
 
@@ -77,16 +79,17 @@ async function craftPlanks(bot, wanted, signal) {
   }
 }
 
-// 材料の枠へ板材を 1 つずつ置き、完成品を取り出す
-async function craftFromPlanks(bot, window, pattern, grid, name) {
+// 材料の枠へ材料を 1 つずつ置き、完成品を取り出す
+// recipe は、置く枠の番号と、その枠に置けるアイテムの判定の組
+async function craftShaped(bot, window, recipe, grid, name) {
   try {
-    for (const slot of pattern) {
-      const plank = readCargo(window).find(({ stack }) => stack && isPlank(stack))
-      if (!plank) throw new Error('板材が足りません')
+    for (const [slot, usable] of recipe) {
+      const material = readCargo(window).find(({ stack }) => stack && usable(stack))
+      if (!material) throw new Error(`${name} の材料が足りません`)
       // 持ち上げて、右クリックで 1 つ置き、残りを元の枠へ戻す
-      await bot.clickWindow(plank.slot, 0, 0)
+      await bot.clickWindow(material.slot, 0, 0)
       await bot.clickWindow(slot, 1, 0)
-      if (window.selectedItem) await bot.clickWindow(plank.slot, 0, 0)
+      if (window.selectedItem) await bot.clickWindow(material.slot, 0, 0)
       await synchronize(bot, window)
       await clearCursor(bot, window)
     }
@@ -96,8 +99,35 @@ async function craftFromPlanks(bot, window, pattern, grid, name) {
   }
 }
 
+const planksAt = (slots) => slots.map((slot) => [slot, isPlank])
+
 // 荷物の板材 4 枚から作業台を作る
-const craftTable = (bot) => craftFromPlanks(bot, bot.inventory, INVENTORY_GRID, INVENTORY_GRID, 'crafting_table')
+const craftTable = (bot) => craftShaped(bot, bot.inventory, planksAt(INVENTORY_GRID), INVENTORY_GRID, 'crafting_table')
+
+// 荷物の板材 2 枚から棒を 4 本作る
+const craftSticks = (bot) => craftShaped(bot, bot.inventory, planksAt([1, 3]), INVENTORY_GRID, 'stick')
+
+// 斧の頭に使う石
+const isAxeStone = (stack) => !stack.protected && ['cobblestone', 'cobbled_deepslate', 'blackstone'].includes(stack.name)
+
+/**
+ * 作業台の画面で、木の斧か石の斧を作る
+ *
+ * @param {import('mineflayer').Bot} bot
+ * @param {object} table 作業台のブロック
+ * @param {'wooden_axe' | 'stone_axe'} name 作る斧
+ */
+async function craftAxe(bot, table, name) {
+  const head = name === 'stone_axe' ? isAxeStone : isPlank
+  const isStick = (stack) => stack.name === 'stick' && !stack.protected
+  const recipe = [...[1, 2, 4].map((slot) => [slot, head]), ...[5, 8].map((slot) => [slot, isStick])]
+  const window = await bot.openBlock(table)
+  try {
+    await craftShaped(bot, window, recipe, TABLE_GRID, name)
+  } finally {
+    window.close()
+  }
+}
 
 /**
  * 作業台の画面で、チェストを指定した数だけ作る
@@ -111,11 +141,11 @@ async function craftChests(bot, table, count, signal) {
   try {
     for (let i = 0; i < count; i++) {
       signal.throwIfAborted()
-      await craftFromPlanks(bot, window, CHEST_PATTERN, [1, 2, 3, 4, 5, 6, 7, 8, 9], 'chest')
+      await craftShaped(bot, window, planksAt(CHEST_PATTERN), TABLE_GRID, 'chest')
     }
   } finally {
     window.close()
   }
 }
 
-module.exports = { isPlank, planksPerLog, countPlanks, plankValue, craftPlanks, craftTable, craftChests }
+module.exports = { isPlank, planksPerLog, isAxeStone, countPlanks, plankValue, craftPlanks, craftTable, craftSticks, craftAxe, craftChests }
