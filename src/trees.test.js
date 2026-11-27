@@ -1,7 +1,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Vec3 } = require('vec3')
-const { analyzeTree } = require('./trees')
+const { analyzeTree, analyzeRemnant } = require('./trees')
 
 // 高さ 63 に草ブロックがあり、(0, 64, 0) から自然のオークが生えた世界
 function createWorld({ height = 5, leaves = true } = {}) {
@@ -26,7 +26,12 @@ function createWorld({ height = 5, leaves = true } = {}) {
     put(0, top + 1, 0, 'oak_leaves', { persistent: false })
   }
   const analyze = () => analyzeTree(blockAt, new Vec3(0, 64, 0))
-  return { put, analyze }
+  // 根元から切って、上部だけを残す
+  const cutBottom = (count) => {
+    for (let y = 0; y < count; y++) blocks.delete(new Vec3(0, 64 + y, 0).toString())
+  }
+  const remnant = (start) => analyzeRemnant(blockAt, start)
+  return { put, analyze, cutBottom, remnant }
 }
 
 test('地面から生えて自然の葉がある幹は、伐採してよい', () => {
@@ -95,4 +100,27 @@ test('地上から届かない高さの木も、登って切れる高さなら�
 
 test('登っても切りきれない高さの木は切らない', () => {
   assert.equal(createWorld({ height: 33 }).analyze().reason, 'tall')
+})
+
+test('根元を切ったあとに宙に残った上部は、切り残しとみなす', () => {
+  const world = createWorld({ height: 10 })
+  world.cutBottom(6)
+  const tree = world.remnant(new Vec3(0, 72, 0))
+  assert.ok(tree.ok)
+  assert.equal(tree.remnant, true)
+  assert.deepEqual(tree.logs.map((p) => p.y), [70, 71, 72, 73])
+  assert.deepEqual(tree.base, [new Vec3(0, 70, 0)])
+  // 根元が地面に立っている木は、切り残しではない
+  assert.equal(createWorld({ height: 10 }).remnant(new Vec3(0, 64, 0)).ok, false)
+})
+
+test('葉のない宙の原木や、隣に置いたブロックがある原木は、切り残しとみなさない', () => {
+  const bare = createWorld({ height: 10, leaves: false })
+  bare.cutBottom(6)
+  assert.equal(bare.remnant(new Vec3(0, 70, 0)).ok, false)
+  const built = createWorld({ height: 10 })
+  built.cutBottom(6)
+  built.put(2, 71, 0, 'stone')
+  built.put(1, 71, 0, 'oak_planks')
+  assert.equal(built.remnant(new Vec3(0, 70, 0)).ok, false)
 })

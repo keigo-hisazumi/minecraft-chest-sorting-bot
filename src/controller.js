@@ -421,14 +421,15 @@ class SortController {
         pending: world.replant ?? [],
         savePending: (spots) => this.saveReplant(key, spots)
       })
+      const logs = `原木 ${result.logs} 個${result.remnants > 0 ? `、切り残し ${result.remnants} 本` : ''}`
       const lines = [
         result.trees < count && !(count === Infinity && result.exhausted)
           ? message.stopped(
               '伐採',
               result.exhausted ? '周りに切れる木が残っていません' : '持ち物の空きがなくなりました',
-              `切ったのは ${result.trees} 本、原木 ${result.logs} 個`
+              `切ったのは ${result.trees} 本、${logs}`
             )
-          : message.done('伐採', `${result.trees} 本`, `原木 ${result.logs} 個${count === Infinity ? '。周りに切れる木がなくなりました' : ''}`)
+          : message.done('伐採', `${result.trees} 本`, `${logs}${count === Infinity ? '。周りに切れる木がなくなりました' : ''}`)
       ]
       if (result.tall > 0) lines.push(`大きすぎて切らなかった木: ${result.tall} 本`)
       if (result.barehanded) lines.push('斧を用意できなかったため、素手で切りました')

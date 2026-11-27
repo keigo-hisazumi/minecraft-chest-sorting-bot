@@ -18,6 +18,8 @@ const CENTER_TICKS = 40
 const CENTER_TOLERANCE = 0.15
 
 const UP = new Vec3(0, 1, 0)
+// 足場の柱を積み始める場所として、そのまま立って足場を置ける草花（置くと消える）
+const PASSABLE_PLANTS = new Set(['short_grass', 'tall_grass', 'fern', 'large_fern', 'dead_bush', 'short_dry_grass', 'tall_dry_grass', 'bush'])
 const isAir = (block) => !block || block.name === 'air' || block.name === 'cave_air' || block.name === 'void_air'
 
 // 条件が満たされるまで、1 tick ずつ待つ
@@ -194,7 +196,7 @@ async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => fal
 /**
  * 原木の真下の地面で、柱を積み始める場所を探す
  * 幹から手が届かない原木（横に張り出した枝など）は、真下から柱を積んで切る。
- * 原木から下へたどり、空気と自然の葉を抜けた先の最初のブロックの上を返す。
+ * 原木から下へたどり、空気と自然の葉と草を抜けた先の最初のブロックの上を返す。
  *
  * @param {import('mineflayer').Bot} bot
  * @param {import('vec3').Vec3} position 切りたい原木の座標
@@ -204,7 +206,7 @@ function findPillarSpot(bot, position) {
   for (let y = position.y - 1; y >= position.y - MAX_CLIMB; y--) {
     const block = bot.blockAt(new Vec3(position.x, y, position.z))
     if (!block) return null
-    if (isAir(block) || isNaturalLeaves(block)) continue
+    if (isAir(block) || isNaturalLeaves(block) || PASSABLE_PLANTS.has(block.name)) continue
     // 液体の上には立てない
     if (block.name === 'water' || block.name === 'lava') return null
     return new Vec3(position.x, y + 1, position.z)
