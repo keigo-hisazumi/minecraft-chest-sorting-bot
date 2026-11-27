@@ -37,6 +37,12 @@ function sortPositions(positions) {
   return [...positions].sort((a, b) => a.x - b.x || a.y - b.y || a.z - b.z)
 }
 
+const formatPosition = ({ x, y, z }) => `${x} ${y} ${z}`
+const formatChest = (positions) => formatPosition(positions[0]) + (positions.length > 1 ? '（大きなチェスト）' : '')
+const samePosition = (a, b) => a.x === b.x && a.y === b.y && a.z === b.z
+// 1 つでも同じ座標があれば、同じチェストとみなす（登録後に大きなチェストへ広げられても一致する）
+const overlaps = (a, b) => a.some((p) => b.some((q) => samePosition(p, q)))
+
 /**
  * チェストが占める座標を返す。大きなチェストは 2 つの座標になる
  *
@@ -70,6 +76,29 @@ function isInRange(center, position) {
 }
 
 /**
+ * 中心の付近にあるチェストをすべて探す。大きなチェストは 1 つとして返す
+ *
+ * @param {import('mineflayer').Bot} bot
+ * @param {{ x: number, y: number, z: number }} center 範囲の中心
+ * @returns {Array<Array<{ x: number, y: number, z: number }>>} チェストごとの座標
+ */
+function findChests(bot, center) {
+  const found = bot.findBlocks({
+    matching: bot.registry.blocksByName[CHEST_NAME].id,
+    point: new Vec3(center.x, center.y, center.z),
+    maxDistance: SEARCH_DISTANCE,
+    count: SEARCH_COUNT
+  })
+  const chests = new Map()
+  for (const position of found) {
+    const positions = chestPositions(bot.blockAt(position))
+    // 片方でも範囲内なら対象にする
+    if (positions.some((p) => isInRange(center, p))) chests.set(formatPosition(positions[0]), positions)
+  }
+  return [...chests.values()]
+}
+
+/**
  * BOT の付近で、一番近いチェストを探す
  *
  * @param {import('mineflayer').Bot} bot
@@ -91,4 +120,17 @@ function findNearestChest(bot, isExcluded) {
   return null
 }
 
-module.exports = { CHEST_NAME, HORIZONTAL_RANGE, VERTICAL_RANGE, sortPositions, chestPositions, isInRange, findNearestChest }
+module.exports = {
+  CHEST_NAME,
+  HORIZONTAL_RANGE,
+  VERTICAL_RANGE,
+  formatPosition,
+  formatChest,
+  samePosition,
+  overlaps,
+  sortPositions,
+  chestPositions,
+  isInRange,
+  findChests,
+  findNearestChest
+}

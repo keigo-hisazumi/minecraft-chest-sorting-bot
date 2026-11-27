@@ -1,0 +1,75 @@
+// 振り分けの計画を、チャット向けの要約と、ファイル向けの詳細な文にする
+
+const { formatPosition, formatChest } = require('./chests')
+
+// チャットに名前を並べる件数の上限（発言が多いと、サーバーに切断されるため要約する）
+const CHAT_LIST_LIMIT = 3
+
+function shorten(texts) {
+  const rest = texts.length - CHAT_LIST_LIMIT
+  return texts.slice(0, CHAT_LIST_LIMIT).join('、') + (rest > 0 ? ` ほか ${rest} 件` : '')
+}
+
+const target = (chest) => (chest ? formatChest(chest) : '新しいチェスト')
+
+/**
+ * チャットで知らせる要約を作る
+ *
+ * @param {object} plan buildPlan の結果
+ * @param {Array<{ positions: Array<object>, reason: string }>} failed 調査できなかったチェスト
+ * @returns {string[]} 発言する文
+ */
+function formatSummary(plan, failed) {
+  const planksText = plan.planks > 0 ? `（板材 ${plan.planks} 枚。作業台がなければ追加で 4 枚）` : ''
+  const lines = [
+    `調査完了: チェスト ${plan.chestCount} 個、アイテム ${plan.itemKinds} 種類`,
+    `専用 ${plan.dedicated.length} 種類 / 混合 ${plan.mixed.items.length} 種類（混合チェスト ${plan.mixed.chests.length} 個） / 保護対象チェスト ${plan.protected.chests.length} 個`,
+    `必要な作業: 新しい大きなチェスト ${plan.newChests} 個、単体チェストの拡張 ${plan.expansions.length} 個${planksText}`,
+    plan.discard.length > 0 ? `廃棄予定: ${shorten(plan.discard.map((d) => `${d.name} ${d.count} 個`))}` : '廃棄予定: なし'
+  ]
+  if (failed.length > 0) {
+    lines.push(`調査できなかったチェスト（計画に含みません）: ${shorten(failed.map((f) => `${formatPosition(f.positions[0])} ${f.reason}`))}`)
+  }
+  lines.push('アイテムは動かしていません。詳しい計画は data/plan.txt を確認してください')
+  return lines
+}
+
+/**
+ * ファイルに残す詳しい計画を作る
+ *
+ * @param {object} plan buildPlan の結果
+ * @param {Array<{ positions: Array<object>, reason: string }>} failed 調査できなかったチェスト
+ * @returns {string} 計画の文
+ */
+function formatDetail(plan, failed) {
+  const section = (title, lines) => [`[${title}]`, ...(lines.length > 0 ? lines : ['なし']), '']
+  return [
+    ...formatSummary(plan, failed),
+    '',
+    ...section(
+      '専用チェスト',
+      plan.dedicated.map((d) => {
+        const overflow = d.protectedOverflow > 0 ? `、保護対象チェストへ ${d.protectedOverflow} 個` : ''
+        const discard = d.discard > 0 ? `、廃棄 ${d.discard} 個` : ''
+        return `${d.name}: 合計 ${d.total} 個 → ${target(d.chest)}${overflow}${discard}`
+      })
+    ),
+    ...section('混合チェスト', plan.mixed.chests.map(target)),
+    ...section(
+      '混合チェストに入れるアイテム',
+      plan.mixed.items.map((i) => `${i.name}: ${i.total} 個`)
+    ),
+    ...section('保護対象チェスト', plan.protected.chests.map(target)),
+    ...section(
+      '廃棄予定',
+      plan.discard.map((d) => `${d.name}: ${d.count} 個`)
+    ),
+    ...section('大きなチェストに広げる単体チェスト', plan.expansions.map(formatChest)),
+    ...section(
+      '調査できなかったチェスト',
+      failed.map((f) => `${formatChest(f.positions)}: ${f.reason}`)
+    )
+  ].join('\n')
+}
+
+module.exports = { formatSummary, formatDetail }

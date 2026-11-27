@@ -21,12 +21,78 @@ function setup(t) {
     come: async (username) => moves.push(`come ${username}`),
     cancel: () => moves.push('cancel')
   }
-  const boot = () => new SortController(bot, new StateStore(file), 'localhost:25565', { navigator, report: () => {} })
+  // 調査は、テストから終わらせられるようにする
+  const surveys = []
+  const survey = (options) =>
+    new Promise((resolve, reject) => {
+      surveys.push({ options, resolve, reject })
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')))
+    })
+  const reports = []
+  const planFile = path.join(dir, 'data', 'plan.txt')
+  const boot = () =>
+    new SortController(bot, new StateStore(file), 'localhost:25565', { navigator, report: (m) => reports.push(m), planFile, survey })
   const controller = boot()
   const run = (text, target = controller) => target.execute(parseCommand(text), 'Tester').join('\n')
   const state = () => controller.store.get(controller.worldKey)
-  return { bot, boot, controller, moves, run, state }
+  return { bot, boot, controller, moves, run, state, surveys, reports, planFile }
 }
+
+const surveyResult = { source: { positions: [{ x: 2, y: 64, z: 0 }], items: [] }, chests: [], failed: [] }
+
+test('指定チェストがなければ調査しない', (t) => {
+  const { run, surveys } = setup(t)
+  assert.match(run('sort plan'), /指定チェストがありません/)
+  assert.equal(surveys.length, 0)
+})
+
+test('調査が終わると、要約を知らせて詳しい計画を保存する', async (t) => {
+  const { bot, controller, run, surveys, reports, planFile } = setup(t)
+  t.mock.method(console, 'log', () => {})
+  bot.putChest(2, 64, 0)
+  run('sort chest 2 64 0')
+  assert.match(run('sort plan'), /調査を始めます/)
+  assert.deepEqual(surveys[0].options.source, [{ x: 2, y: 64, z: 0 }])
+  const { done } = controller.task
+  surveys[0].resolve(surveyResult)
+  await done
+  assert.match(reports[0], /調査完了: チェスト 1 個/)
+  assert.match(fs.readFileSync(planFile, 'utf8'), /\[廃棄予定\]/)
+  assert.equal(controller.task, null)
+})
+
+test('調査中は登録の変更や移動を受け付けず、停止で中止できる', async (t) => {
+  const { bot, controller, run, surveys, reports, state } = setup(t)
+  bot.putChest(2, 64, 0)
+  bot.putChest(5, 64, 0)
+  run('sort chest 2 64 0')
+  run('sort plan')
+  for (const text of ['sort start', 'sort plan', 'sort chest 5 64 0', 'sort exclude 5 64 0', 'sort come']) {
+    assert.match(run(text), /調査中です/, text)
+  }
+  assert.match(run('sort status'), /指定チェスト: 2 64 0/)
+  const { done } = controller.task
+  run('sort stop')
+  assert.ok(surveys[0].options.signal.aborted)
+  assert.match(run('sort plan'), /中止しています/)
+  await done
+  assert.deepEqual(reports, [])
+  assert.equal(state().excluded.length, 0)
+  assert.match(run('sort plan'), /調査を始めます/)
+  controller.dispose()
+})
+
+test('調査に失敗したら理由を知らせる', async (t) => {
+  const { bot, controller, run, surveys, reports } = setup(t)
+  t.mock.method(console, 'error', () => {})
+  bot.putChest(2, 64, 0)
+  run('sort chest 2 64 0')
+  run('sort plan')
+  const { done } = controller.task
+  surveys[0].reject(new Error('指定チェストを調査できません'))
+  await done
+  assert.deepEqual(reports, ['調査に失敗しました: 指定チェストを調査できません'])
+})
 
 test('呼び寄せは発言したプレイヤーへの移動を始め、停止で中止する', (t) => {
   const { moves, run } = setup(t)

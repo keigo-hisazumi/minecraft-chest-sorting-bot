@@ -1,9 +1,11 @@
-// プレイヤーのそばへの移動
+// BOT の移動
 
 const { Movements, goals } = require('mineflayer-pathfinder')
 
 // プレイヤーから、この距離（ブロック）まで近づいたら到着とする
 const NEAR_DISTANCE = 1
+// 1 回の移動にかける時間の上限（ミリ秒）
+const MOVE_TIMEOUT_MS = 60000
 
 /**
  * 移動のルールを作る。移動中は、ブロックの破壊と足場の設置をしない
@@ -27,12 +29,45 @@ class Navigator {
    * @param {import('mineflayer').Bot} bot
    * @param {object} [options]
    * @param {(bot: import('mineflayer').Bot) => object} [options.movementsFactory] 移動のルールを作る関数
+   * @param {number} [options.timeout] 1 回の移動にかける時間の上限（ミリ秒）
    */
-  constructor(bot, { movementsFactory = createMovements } = {}) {
+  constructor(bot, { movementsFactory = createMovements, timeout = MOVE_TIMEOUT_MS } = {}) {
     this.bot = bot
     this.movementsFactory = movementsFactory
-    // 移動を始めるか中止するたびに増やす。古い移動の結果は報告しない
+    this.timeout = timeout
+    // 移動を始めるか中止するたびに増やす。古い移動の結果は使わない
     this.generation = 0
+  }
+
+  /**
+   * 目標の場所へ移動する
+   *
+   * @param {import('mineflayer-pathfinder').goals.Goal} goal 目標
+   * @returns {Promise<{ status: 'arrived' | 'failed' | 'cancelled', reason?: string }>} 移動の結果。
+   *   cancelled は、中止されたか、別の移動に切り替わったことを表す
+   */
+  async moveTo(goal) {
+    const generation = ++this.generation
+    let timer
+    let failure = null
+    try {
+      this.bot.pathfinder.setMovements(this.movementsFactory(this.bot))
+      await Promise.race([
+        this.bot.pathfinder.goto(goal),
+        new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('時間内に着けませんでした')), this.timeout)
+        })
+      ])
+    } catch (err) {
+      failure = err
+    } finally {
+      clearTimeout(timer)
+    }
+    if (generation !== this.generation) return { status: 'cancelled' }
+    // 道がない場合でも goto が成功として終わることがあるため、着いた場所を確かめる
+    if (!failure && goal.isEnd(this.bot.entity.position.floored())) return { status: 'arrived' }
+    this.bot.pathfinder.setGoal(null)
+    return { status: 'failed', reason: failure?.message }
   }
 
   /**
@@ -47,25 +82,11 @@ class Navigator {
       report('姿が見えません。BOT の近くで発言してください')
       return
     }
-    const generation = ++this.generation
     const { x, y, z } = target.position
-    const goal = new goals.GoalNear(x, y, z, NEAR_DISTANCE)
     report(`${username} のそばへ向かいます`)
-    let failure = null
-    try {
-      this.bot.pathfinder.setMovements(this.movementsFactory(this.bot))
-      await this.bot.pathfinder.goto(goal)
-    } catch (err) {
-      failure = err
-    }
-    if (generation !== this.generation) return
-    // 道がない場合でも goto が成功として終わることがあるため、着いた場所を確かめる
-    if (!failure && goal.isEnd(this.bot.entity.position.floored())) {
-      report('到着しました')
-      return
-    }
-    this.bot.pathfinder.setGoal(null)
-    report(`そばまで行けませんでした${failure ? `: ${failure.message}` : ''}`)
+    const { status, reason } = await this.moveTo(new goals.GoalNear(x, y, z, NEAR_DISTANCE))
+    if (status === 'arrived') report('到着しました')
+    if (status === 'failed') report(`そばまで行けませんでした${reason ? `: ${reason}` : ''}`)
   }
 
   // 移動を中止する
