@@ -1,11 +1,12 @@
 // 伐採と植え直し
-// 範囲内の自然の木を切って原木を集め、根元に苗木を植える。斧は、木の斧と石の斧だけを使う。
+// 範囲内の自然の木を切って原木を集める。斧は、木の斧と石の斧だけを使う。
+// 苗木の植え直しは、指示された場合だけ行う。切った場所は、指示されたときのために記録する。
 
 const { goals } = require('mineflayer-pathfinder')
 const { isInRange, formatPosition } = require('./chests')
 const { countPlanks, plankValue, planksPerLog, isPlank, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
 const { createMovements } = require('./navigation')
-const { LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves } = require('./trees')
+const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves } = require('./trees')
 const { toVec3, toChest, cargoStacks, emptyCargoSlots, refresh, moveStack, hold, release, hotbarSlots, withChest } = require('./window')
 
 const AXES = ['stone_axe', 'wooden_axe']
@@ -15,8 +16,6 @@ const DIG_REACH = 4
 const COLLECT_DISTANCE = 8
 // 落ちたアイテムが拾えるようになるのを待つ時間（tick）
 const DROP_WAIT_TICKS = 20
-// 苗木を得るために壊す葉の数の上限
-const LEAF_LIMIT = 40
 // 1 回の呼び出しで伐採する木の数の上限
 const TREE_LIMIT = 40
 // 拾うアイテム
@@ -97,7 +96,7 @@ async function holdAxe(bot) {
  * @returns {Promise<boolean>} 持てた場合は true。材料がないなどで用意できなければ false
  */
 async function ensureAxe(context, records) {
-  const { bot, signal, getTable } = context
+  const { bot, signal, getTable, notify } = context
   if (await holdAxe(bot)) return true
   await withdraw(context, records, isAxe, 1)
   if (await holdAxe(bot)) return true
@@ -109,13 +108,20 @@ async function ensureAxe(context, records) {
   const planks = (sticks() < 2 ? 2 : 0) + (name === 'wooden_axe' ? 3 : 0) + (needsTable ? 4 : 0)
   if (heldValue(bot) < planks) return false
   signal.throwIfAborted()
-  if (countPlanks(cargoStacks(bot.inventory)) < planks) await craftPlanks(bot, planks, signal)
+  if (countPlanks(cargoStacks(bot.inventory)) < planks) {
+    notify('クラフトします: 板材')
+    await craftPlanks(bot, planks, signal)
+  }
   const table = await getTable({ create: true })
   if (!table) return false
-  if (sticks() < 2) await craftSticks(bot)
+  if (sticks() < 2) {
+    notify('クラフトします: 棒')
+    await craftSticks(bot)
+  }
   const reached = await context.navigator.moveTo(new goals.GoalLookAtBlock(table.position, bot.world, { reach: DIG_REACH }))
   signal.throwIfAborted()
   if (reached.status !== 'arrived') return false
+  notify(`クラフトします: ${name === 'stone_axe' ? '石の斧' : '木の斧'}`)
   await craftAxe(bot, table, name)
   return holdAxe(bot)
 }
@@ -165,32 +171,8 @@ async function collectDrops(context, center) {
   }
 }
 
-// 苗木が足りなければ、切った木の周りの葉を壊して集める
-async function gatherSaplings(context, tree, wanted) {
-  const { bot, signal } = context
-  const sapling = (s) => s.name === `${tree.type}_sapling` && !s.protected
-  if (countHeld(bot, sapling) >= wanted) return
-  const leaves = bot
-    .findBlocks({
-      matching: bot.registry.blocksByName[`${tree.type}_leaves`].id,
-      point: tree.base[0],
-      maxDistance: 5,
-      count: LEAF_LIMIT * 3
-    })
-    .filter((p) => isNaturalLeaves(bot.blockAt(p)) && bot.canDigBlock(bot.blockAt(p)))
-    .slice(0, LEAF_LIMIT)
-  // 斧の耐久値を減らさないように、空き手で壊す
-  const empty = hotbarSlots(bot.inventory).findIndex((slot) => !bot.inventory.slots[slot])
-  if (empty >= 0) bot.setQuickBarSlot(empty)
-  for (const position of leaves) {
-    signal.throwIfAborted()
-    await digAt(context, position, `${tree.type}_leaves`)
-  }
-  await collectDrops(context, tree.base[0])
-}
-
 /**
- * 苗木を植え直す
+ * 苗木を植え直す。指示された場合だけ呼び出す
  *
  * @param {object} context
  * @param {Array<{ x: number, y: number, z: number, name: string }>} pending 植え直す場所と苗木
@@ -254,7 +236,7 @@ async function replant(context, pending, records) {
   return { planted, pending: rest }
 }
 
-// 1 本の木を切り、落ちた原木と苗木を拾う
+// 1 本の木を切り、落ちた原木と、落ちていれば苗木を拾う
 async function fellTree(context, tree, records) {
   const { bot } = context
   let cut = 0
@@ -270,18 +252,18 @@ async function fellTree(context, tree, records) {
 /**
  * 手持ちの木材が、板材に換算して必要な数になるまで伐採する
  *
- * @param {object} context bot、navigator、signal、center、failed と、作業台を返す getTable
+ * @param {object} context bot、navigator、signal、center、failed と、作業台を返す getTable、通知する notify
  * @param {object} options
  * @param {number} options.wanted 必要な板材の数
  * @param {Array<object>} options.records チェストの中身
- * @param {Array<object>} options.pending 植え直す場所
- * @param {(pending: Array<object>) => void} options.savePending 植え直す場所を保存する関数
- * @returns {Promise<{ trees: number, logs: number, planted: number, pending: object[], tall: number, exhausted: boolean, barehanded: boolean }>}
+ * @param {Array<object>} options.pending 植え直していない場所
+ * @param {(pending: Array<object>) => void} options.savePending 植え直していない場所を保存する関数
+ * @returns {Promise<{ trees: number, logs: number, pending: object[], tall: number, exhausted: boolean, barehanded: boolean }>}
  *   exhausted は、必要な数が揃う前に切れる木がなくなったことを表す
  */
 async function gatherWood(context, { wanted, records, pending, savePending }) {
-  const { bot, signal } = context
-  const result = { trees: 0, logs: 0, planted: 0, pending, tall: 0, exhausted: false, barehanded: false }
+  const { bot, signal, notify } = context
+  const result = { trees: 0, logs: 0, pending, tall: 0, exhausted: false, barehanded: false }
   const skipped = new Set()
   // 伐採を始める前から空いている枠には、拾ったアイテムが入る
   const emptyBefore = new Set(hotbarSlots(bot.inventory).filter((slot) => !bot.inventory.slots[slot]))
@@ -296,6 +278,7 @@ async function gatherWood(context, { wanted, records, pending, savePending }) {
       break
     }
     skipped.add(tree.base[0].toString())
+    notify(`伐採します: ${TREE_LABELS[tree.type]} (${formatPosition(tree.base[0])})`)
     // 切る前に植え直す場所を保存して、中断しても忘れないようにする
     const spots = tree.base.map(({ x, y, z }) => ({ x, y, z, name: `${tree.type}_sapling` }))
     const fresh = spots.filter((s) => !result.pending.some((p) => p.x === s.x && p.y === s.y && p.z === s.z))
@@ -311,12 +294,6 @@ async function gatherWood(context, { wanted, records, pending, savePending }) {
     }
     result.trees++
     result.logs += cut
-    await gatherSaplings(context, tree, result.pending.filter((p) => p.name === `${tree.type}_sapling`).length)
-    await stow()
-    const replanted = await replant(context, result.pending, records)
-    result.planted += replanted.planted
-    result.pending = replanted.pending
-    savePending(result.pending)
   }
   result.barehanded = Boolean(context.barehanded)
   return result

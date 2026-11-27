@@ -3,8 +3,18 @@
 
 const { Vec3 } = require('vec3')
 
-// 伐採する地上の木の種類
-const TREE_TYPES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'cherry', 'dark_oak', 'pale_oak']
+// 伐採する地上の木の種類と、通知に使う名前
+const TREE_LABELS = {
+  oak: 'オーク',
+  spruce: 'トウヒ',
+  birch: 'シラカバ',
+  jungle: 'ジャングル',
+  acacia: 'アカシア',
+  cherry: 'サクラ',
+  dark_oak: 'ダークオーク',
+  pale_oak: 'ペールオーク'
+}
+const TREE_TYPES = Object.keys(TREE_LABELS)
 const LOG_NAMES = TREE_TYPES.map((type) => `${type}_log`)
 
 // 1 本の木とみなす原木の数の上限
@@ -111,4 +121,4 @@ function analyzeTree(blockAt, start) {
   return reachable ? { ...tree, ok: true } : rejected('tall')
 }
 
-module.exports = { TREE_TYPES, LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves }
+module.exports = { TREE_LABELS, TREE_TYPES, LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves }

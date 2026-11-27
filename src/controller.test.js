@@ -51,6 +51,12 @@ function setup(t) {
     readSourceSignature: async () => sorting.signature
   }
   const controllers = []
+  // 植え直しは呼び出しを記録し、すべて植えたことにする
+  const replants = []
+  const replanter = async (context, pending, records) => {
+    replants.push({ pending, records })
+    return { planted: pending.length, pending: [] }
+  }
   const boot = () => {
     const created = new SortController(bot, new StateStore(file), 'localhost:25565', {
       navigator,
@@ -58,6 +64,7 @@ function setup(t) {
       planFile,
       survey,
       sorter,
+      replanter,
       pollInterval: 5
     })
     controllers.push(created)
@@ -73,7 +80,7 @@ function setup(t) {
     run('sort stop')
     await done
   }
-  return { bot, boot, controller, moves, run, state, stop, surveys, reports, planFile, sorting }
+  return { bot, boot, controller, moves, run, state, stop, surveys, reports, planFile, sorting, replants }
 }
 
 async function until(check) {
@@ -319,6 +326,49 @@ test('再起動後は、開始の状態なら整理を再開する', async (t) =
   const restarted = boot()
   restarted.resume()
   await until(() => sorting.runs.length === 2)
+})
+
+const spots = [{ x: 7, y: 64, z: 0, name: 'oak_sapling' }]
+
+test('整理や再起動では植え直さず、指示した場合だけ植え直す', async (t) => {
+  const { sorting, run, stop, controller, boot, state, replants, reports } = started(t)
+  await until(() => sorting.runs.length === 1)
+  sorting.runs[0].saveReplant(spots)
+  sorting.signature = 'b'
+  await until(() => sorting.runs.length === 2)
+  controller.dispose()
+  await until(() => controller.task === null)
+  boot().resume()
+  await until(() => sorting.runs.length === 3)
+  assert.equal(replants.length, 0)
+  assert.deepEqual(state().replant, spots)
+  assert.match(run('sort status'), /植え直していない場所: 1 か所/)
+  assert.ok(reports.every((m) => !m.includes('植えました')))
+})
+
+test('整理中は植え直しを受け付けず、停止してから植え直す', async (t) => {
+  const { sorting, run, stop, controller, state, surveys, replants, reports } = started(t)
+  await until(() => sorting.runs.length === 1)
+  sorting.runs[0].saveReplant(spots)
+  assert.match(run('sort replant'), /整理中です/)
+  await stop()
+  assert.match(run('sort replant'), /植え直しを始めます（1 か所）/)
+  assert.match(run('sort start'), /植え直し中です/)
+  const { done } = controller.task
+  surveys[0].resolve(surveyResult)
+  await done
+  assert.deepEqual(replants[0].pending, spots)
+  assert.equal(replants[0].records.length, 1)
+  assert.deepEqual(state().replant, [])
+  assert.equal(reports.at(-1), '苗木を 1 個植えました')
+  assert.match(run('sort replant'), /植え直す場所はありません/)
+})
+
+test('伐採とクラフトの通知は、チャットへ知らせる', async (t) => {
+  const { sorting, reports } = started(t)
+  await until(() => sorting.runs.length === 1)
+  sorting.runs[0].notify('クラフトします: 板材')
+  assert.ok(reports.includes('クラフトします: 板材'))
 })
 
 test('死亡したら整理を停止して場所を知らせる', async (t) => {

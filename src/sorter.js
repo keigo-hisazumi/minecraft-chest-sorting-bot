@@ -159,10 +159,10 @@ async function carry(context, chests) {
  *   carried: number, misplaced: number, failed: object[], build: object, signature: string }>} 整理の結果。
  *   sourceItems は指定チェストに残った個数、misplaced は整理先に残った移すべきアイテムの枠の数
  */
-async function sortOnce({ bot, navigator, world, saveAssignments, saveReplant, signal, build = buildChests }) {
+async function sortOnce({ bot, navigator, world, saveAssignments, saveReplant, notify, signal, build = buildChests }) {
   const inspect = () => surveyChests({ bot, navigator, source: world.source.positions, excluded: world.excluded, signal })
   let survey = await inspect()
-  const built = await build({ bot, navigator, survey, world, signal, saveReplant })
+  const built = await build({ bot, navigator, survey, world, signal, saveReplant, notify })
   // 材料を取り出したり、チェストを置いたりした場合は、調べ直す
   if (built.changed) survey = await inspect()
   // 荷物として持っている分も、合計に含める
