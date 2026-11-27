@@ -1,17 +1,16 @@
 // アイテムの移動
 // 指定チェストと整理先を調査して振り分け先を決め、BOT のインベントリを使ってアイテムを移す。
-// BOT のホットバーは食料などの持ち物に使い、それ以外の枠にあるアイテムは運んでいる荷物とみなす。
+// 足りないチェストは、移す前に作って置く。
 
-const { Vec3 } = require('vec3')
 const { goals } = require('mineflayer-pathfinder')
-const { CHEST_NAME, formatPosition, overlaps } = require('./chests')
+const { buildChests } = require('./builder')
+const { formatPosition, overlaps } = require('./chests')
 const { describeItem } = require('./items')
 const { createLayout, sameKind, destinationFor, evictableStacks, movableStacks } = require('./moves')
 const { buildPlan } = require('./plan')
-const { surveyChests, readChest, REACH } = require('./survey')
+const { surveyChests, readChest } = require('./survey')
+const { toChest, readCargo, cargoStacks, emptyCargoSlots, refresh, moveStack, withChest } = require('./window')
 
-// インベントリのうち、荷物に使う枠の数（ホットバーを除く）
-const CARGO_SLOTS = 27
 // 中身を入れ替えるために、空けておく枠の数
 const RESERVED_SLOTS = 3
 // 何も動かせない訪問がこの回数続いたら、その回の整理を終える
@@ -20,65 +19,6 @@ const STALL_LIMIT = 3
 const VISIT_LIMIT = 1000
 // 整理のあとに待つ場所の、指定チェストからの距離（ブロック）
 const WAIT_DISTANCE = 4
-
-const toVec3 = ({ x, y, z }) => new Vec3(x, y, z)
-
-const toChest = (record) => ({
-  positions: record.positions,
-  size: 27 * record.positions.length,
-  slots: new Map(record.items.map((item) => [item.slot, item])),
-  unavailable: false
-})
-
-// 開いているウィンドウ（閉じているときは BOT のインベントリ）から、荷物の枠を読む
-function readCargo(window) {
-  const slots = []
-  for (let slot = window.inventoryStart; slot < window.inventoryStart + CARGO_SLOTS; slot++) {
-    const item = window.slots[slot]
-    slots.push({ slot, stack: item ? { ...describeItem(item), slot } : null })
-  }
-  return slots
-}
-
-const cargoStacks = (window) => readCargo(window).flatMap((s) => (s.stack ? [s.stack] : []))
-const emptyCargoSlots = (window) => readCargo(window).filter((s) => !s.stack).map((s) => s.slot)
-
-function refresh(chest, window) {
-  chest.slots = new Map()
-  for (let slot = 0; slot < window.inventoryStart; slot++) {
-    const item = window.slots[slot]
-    if (item) chest.slots.set(slot, { ...describeItem(item), slot })
-  }
-}
-
-// サーバーが持つ中身を受け取り直す
-async function synchronize(bot, window) {
-  if (bot._syncWindow) await bot._syncWindow(window)
-  else await bot.waitForTicks(5)
-}
-
-/**
- * ウィンドウの中で、1 つの枠のアイテムを別の枠へ移す
- * 移し先は、空きか、同じアイテムの枠にする。入りきらない分は、元の枠へ戻す。
- *
- * @returns {Promise<number>} 移せた個数
- */
-async function moveStack(bot, window, from, to) {
-  const before = window.slots[from]?.count ?? 0
-  await bot.clickWindow(from, 0, 0)
-  await bot.clickWindow(to, 0, 0)
-  if (window.selectedItem) await bot.clickWindow(from, 0, 0)
-  await synchronize(bot, window)
-  // カーソルに残ると、閉じたときに落ちることがあるため、空き枠へ置く
-  if (window.selectedItem) {
-    const empty = emptyCargoSlots(window)[0] ?? window.firstEmptySlotRange(0, window.inventoryStart)
-    if (empty === null || empty === undefined) throw new Error('持っているアイテムを置く場所がありません')
-    await bot.clickWindow(empty, 0, 0)
-    await synchronize(bot, window)
-  }
-  const after = window.slots[from]?.count ?? 0
-  return Math.max(0, before - after)
-}
 
 // チェストの中で、アイテムを足せる枠（同じアイテムの枠を先に使う）
 function roomSlot(chest, stack) {
@@ -118,50 +58,6 @@ async function storeStack({ bot, signal, layout, source }, window, chest, cargoS
     if (moved === 0) break
   }
   return result
-}
-
-// チェストのそばへ行って開き、操作して閉じる。行けない、開けない場合は null を返す
-async function withChest({ bot, navigator, signal, failed }, chest, operate) {
-  const record = await readyToOpen({ bot, navigator, signal }, chest)
-  if (!record.block) {
-    chest.unavailable = true
-    failed.push({ positions: chest.positions, reason: record.reason })
-    return null
-  }
-  let window
-  try {
-    window = await bot.openContainer(record.block)
-  } catch (err) {
-    console.error(`チェスト (${formatPosition(record.block.position)}) を開けませんでした:`, err.message)
-    signal.throwIfAborted()
-    chest.unavailable = true
-    failed.push({ positions: chest.positions, reason: '開けません' })
-    return null
-  }
-  try {
-    if (window.inventoryStart !== chest.size) {
-      chest.unavailable = true
-      failed.push({ positions: chest.positions, reason: '大きさが変わりました' })
-      return null
-    }
-    refresh(chest, window)
-    return await operate(window)
-  } finally {
-    window.close()
-  }
-}
-
-async function readyToOpen({ bot, navigator, signal }, chest) {
-  signal.throwIfAborted()
-  for (const position of chest.positions) {
-    const result = await navigator.moveTo(new goals.GoalLookAtBlock(toVec3(position), bot.world, { reach: REACH }))
-    signal.throwIfAborted()
-    if (result.status !== 'arrived') continue
-    const block = bot.blockAt(toVec3(position))
-    if (block?.name !== CHEST_NAME) return { reason: 'チェストがありません' }
-    return { block }
-  }
-  return { reason: '到達できません' }
 }
 
 // 荷物を届け、必要ならよそへ移すアイテムを持ち出す
@@ -258,15 +154,20 @@ async function carry(context, chests) {
  * @param {{ source: { positions: Array<object> }, excluded: Array, assignments: object }} options.world 登録情報
  * @param {(assignments: object) => void} options.saveAssignments 決めた振り分け先を保存する関数
  * @param {AbortSignal} options.signal 中止の合図
+ * @param {typeof buildChests} [options.build] 足りないチェストを作る関数
  * @returns {Promise<{ delivered: number, shortage: string[], missingChests: number, sourceItems: number,
- *   carried: number, misplaced: number, failed: object[], signature: string }>} 整理の結果。
+ *   carried: number, misplaced: number, failed: object[], build: object, signature: string }>} 整理の結果。
  *   sourceItems は指定チェストに残った個数、misplaced は整理先に残った移すべきアイテムの枠の数
  */
-async function sortOnce({ bot, navigator, world, saveAssignments, signal }) {
-  const survey = await surveyChests({ bot, navigator, source: world.source.positions, excluded: world.excluded, signal })
+async function sortOnce({ bot, navigator, world, saveAssignments, signal, build = buildChests }) {
+  const inspect = () => surveyChests({ bot, navigator, source: world.source.positions, excluded: world.excluded, signal })
+  let survey = await inspect()
+  const built = await build({ bot, navigator, survey, world, signal })
+  // 材料を取り出したり、チェストを置いたりした場合は、調べ直す
+  if (built.changed) survey = await inspect()
   // 荷物として持っている分も、合計に含める
   const holding = { positions: [], items: cargoStacks(bot.inventory) }
-  // この段階ではチェストを作れないため、専用チェストには、今ある大きなチェストだけを使う
+  // 専用チェストには、大きなチェストだけを使う
   const plan = buildPlan(
     { source: { ...survey.source, items: [...survey.source.items, ...holding.items] }, chests: survey.chests },
     {
@@ -297,6 +198,7 @@ async function sortOnce({ bot, navigator, world, saveAssignments, signal }) {
     carried: total(cargoStacks(bot.inventory)),
     misplaced: chests.reduce((count, c) => count + movableStacks(layout, c).length, 0),
     failed,
+    build: built,
     signature: signatureOf(source.positions, [...source.slots.values()])
   }
 }
@@ -341,4 +243,4 @@ function signatureOf(positions, items) {
   return JSON.stringify([positions, counts])
 }
 
-module.exports = { sortOnce, readSourceSignature, signatureOf, moveStack, RESERVED_SLOTS }
+module.exports = { sortOnce, readSourceSignature, signatureOf, RESERVED_SLOTS }

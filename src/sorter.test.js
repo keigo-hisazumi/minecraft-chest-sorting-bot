@@ -23,6 +23,8 @@ function setup(sourceItems) {
         assignments = saved
       },
       signal: new AbortController().signal,
+      // チェストの作成と設置は、ここでは行わない
+      build: async () => ({ changed: false, expanded: 0, created: 0, tablePlaced: false, problems: [] }),
       ...options
     })
     // どの場合も、移動の前後でアイテムの総数は変わらない
