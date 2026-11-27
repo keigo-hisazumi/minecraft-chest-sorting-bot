@@ -98,8 +98,10 @@ test('地上から届かない高さの木も、登って切れる高さなら�
   assert.equal(tree.logs.length, 12)
 })
 
-test('登っても切りきれない高さの木は切らない', () => {
-  assert.equal(createWorld({ height: 33 }).analyze().reason, 'tall')
+test('どんなに高い木も対象にする', () => {
+  const tree = createWorld({ height: 60 }).analyze()
+  assert.ok(tree.ok)
+  assert.equal(tree.logs.length, 60)
 })
 
 test('根元を切ったあとに宙に残った上部は、切り残しとみなす', () => {

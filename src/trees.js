@@ -17,11 +17,8 @@ const TREE_LABELS = {
 const TREE_TYPES = Object.keys(TREE_LABELS)
 const LOG_NAMES = TREE_TYPES.map((type) => `${type}_log`)
 
-// 1 本の木とみなす原木の数の上限（太いジャングルの木でも収まる数）
-const MAX_LOGS = 160
-// 切る木の、根元からの高さと水平の広がりの上限。地上から届かない高さは、幹の跡に柱を積んで登って切る（climb.js）
-const MAX_HEIGHT = 31
-const MAX_SPREAD = 4
+// 1 本の木とみなす原木の数の上限。木の大きさでは断らないが、原木が数千もつながる建物（ログハウスなど）は木とみなさない
+const MAX_LOGS = 2000
 // 自然の木とみなすのに必要な、原木に接した葉の数
 const MIN_LEAVES = 4
 
@@ -89,8 +86,8 @@ function connectedLogs(blockAt, start, name) {
  *
  * @param {(position: Vec3) => object | null} blockAt
  * @param {Vec3} start 原木の座標
- * @returns {{ ok: boolean, reason?: 'built' | 'tall', type: string, logs: Vec3[], base: Vec3[] }}
- *   logs は低い順。base は根元の原木。built は建築物の可能性、tall は登っても切りきれない大きさ
+ * @returns {{ ok: boolean, reason?: 'built', type: string, logs: Vec3[], base: Vec3[] }}
+ *   logs は低い順。base は根元の原木。built は建築物の可能性（木の大きさでは断らない）
  */
 function analyzeTree(blockAt, start) {
   const name = blockAt(start).name
@@ -115,10 +112,7 @@ function analyzeTree(blockAt, start) {
     }
   }
   if (leaves.size < MIN_LEAVES) return rejected('built')
-  const reachable = logs.every(
-    (p) => p.y - base[0].y <= MAX_HEIGHT && Math.abs(p.x - base[0].x) <= MAX_SPREAD && Math.abs(p.z - base[0].z) <= MAX_SPREAD
-  )
-  return reachable ? { ...tree, ok: true } : rejected('tall')
+  return { ...tree, ok: true }
 }
 
 /**
@@ -152,10 +146,7 @@ function analyzeRemnant(blockAt, start) {
     }
   }
   if (leaves.size < MIN_LEAVES) return tree
-  const compact = logs.every(
-    (p) => p.y - base[0].y <= MAX_HEIGHT && Math.abs(p.x - base[0].x) <= MAX_SPREAD && Math.abs(p.z - base[0].z) <= MAX_SPREAD
-  )
-  return { ...tree, ok: compact }
+  return { ...tree, ok: true }
 }
 
-module.exports = { MAX_HEIGHT, TREE_LABELS, TREE_TYPES, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves, isPlacedLeaves }
+module.exports = { TREE_LABELS, TREE_TYPES, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves, isPlacedLeaves }

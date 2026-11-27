@@ -6,8 +6,8 @@
 const { Vec3 } = require('vec3')
 const { isNaturalLeaves } = require('./trees')
 
-// 根元から登ってよい高さ（ブロック）
-const MAX_CLIMB = 32
+// 根元から登ってよい高さ（ブロック）。ワールドの高さ（-64〜320）いっぱいまで登れるようにする
+const MAX_CLIMB = 384
 // ジャンプして、足元にブロックを置ける高さに届くまで待つ時間（tick）
 const JUMP_TICKS = 20
 // 着地するまで待つ時間（tick）

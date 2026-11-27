@@ -431,7 +431,6 @@ class SortController {
             )
           : message.done('伐採', `${result.trees} 本`, `${logs}${count === Infinity ? '。周りに切れる木がなくなりました' : ''}`)
       ]
-      if (result.tall > 0) lines.push(`大きすぎて切らなかった木: ${result.tall} 本`)
       if (result.barehanded) lines.push('斧を用意できなかったため、素手で切りました')
       if (result.pending.length > 0) {
         lines.push(`植え直していない場所が ${result.pending.length} か所あります（植え直すには sort replant と発言してください）`)
