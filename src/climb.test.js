@@ -3,7 +3,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Vec3 } = require('vec3')
-const { cutFromTrunk } = require('./climb')
+const { cutFromTrunk, findPillarSpot } = require('./climb')
 
 // 高さ 63 が地面で、(0, 64, 0) から高さ height のオークの幹がある世界と、ジャンプと着地だけを真似る BOT の偽物
 // 根元の 2 つの原木は、地上から切ったものとして、はじめから空いている
@@ -116,5 +116,22 @@ test('cutFromTrunk: 原木を残して登るのをやめたら、理由を知ら
   const reasons = []
   await cutFromTrunk(bot, tree, { ...ops, onStop: (reason) => reasons.push(reason) })
   assert.equal(reasons.length, 1)
-  assert.match(reasons[0], /^足場にするブロックを持っていません（残り \d+ 個）$/)
+  assert.match(reasons[0], /^足場にするブロックを持っていません$/)
+})
+
+test('findPillarSpot: 原木の真下で、空気と葉を抜けた先の地面の上を返す', () => {
+  const blocks = new Map([
+    ['3,70,0', 'oak_log'],
+    ['3,68,0', 'oak_leaves']
+  ])
+  const blockAt = (p) => {
+    const name = blocks.get(`${p.x},${p.y},${p.z}`) ?? (p.y <= 63 ? 'grass_block' : 'air')
+    return { name, position: p, getProperties: () => ({ persistent: false }) }
+  }
+  assert.deepEqual(findPillarSpot({ blockAt }, new Vec3(3, 70, 0)), new Vec3(3, 64, 0))
+  // 地面が遠すぎれば見つからない
+  assert.equal(findPillarSpot({ blockAt }, new Vec3(3, 120, 0)), null)
+  // 水の上には立てない
+  blocks.set('3,63,0', 'water')
+  assert.equal(findPillarSpot({ blockAt }, new Vec3(3, 70, 0)), null)
 })
