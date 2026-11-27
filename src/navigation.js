@@ -2,6 +2,7 @@
 
 const { Movements, goals } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
+const { allowPlantReplacement, escape } = require('./escape')
 const { message } = require('./messages')
 
 // プレイヤーから、この距離（ブロック）まで近づいたら到着とする
@@ -38,7 +39,8 @@ function createMovements(bot) {
   // サボテンに触れる経路は通らない
   const cactus = bot.registry.blocksByName.cactus
   if (cactus) movements.blocksToAvoid.add(cactus.id)
-  return movements
+  // 草の上にも足場を置けるものとする（採掘 BOT と同じ）
+  return allowPlantReplacement(movements, bot.registry)
 }
 
 /**
@@ -76,9 +78,16 @@ class Navigator {
    * @param {number} [options.timeout] 1 回の移動にかける時間の上限（ミリ秒）
    * @param {number} [options.stallMs] 経路に沿って動いているのに止まったとみなす時間（ミリ秒）
    * @param {number} [options.attempts] 止まったときに移動をやり直す最大の回数（最初の 1 回を含む）
+   * @param {object} [options.escape] 動けなくなったときの脱出（escape.js）に渡すもの。なければ脱出しない
+   * @param {() => Promise<boolean>} options.escape.holdBlock 足場に積むブロックを手に持つ。なければ false
+   * @param {(text: string) => void} [options.escape.notify] チャットへの通知
    */
-  constructor(bot, { movementsFactory = createMovements, timeout = MOVE_TIMEOUT_MS, stallMs = STALL_MS, attempts = MAX_ATTEMPTS } = {}) {
+  constructor(
+    bot,
+    { movementsFactory = createMovements, timeout = MOVE_TIMEOUT_MS, stallMs = STALL_MS, attempts = MAX_ATTEMPTS, escape = null } = {}
+  ) {
     this.bot = bot
+    this.escape = escape
     this.movementsFactory = movementsFactory
     this.timeout = timeout
     this.stallMs = stallMs
@@ -91,6 +100,7 @@ class Navigator {
    * 目標の場所へ移動する
    * 経路に沿って動いているのに止まってしまった（体が斜めになって段差を登れないなど）ときは、
    * 体をブロックの中央に戻して、やり直す。通常の goto は、この状態で成功も失敗もせずに待ち続けるため。
+   * それでも着けなければ、穴から登るなどして抜け出し（escape.js）、もう一度やり直す。
    *
    * @param {import('mineflayer-pathfinder').goals.Goal} goal 目標
    * @param {(bot: import('mineflayer').Bot) => object} [movementsFactory] この移動だけで使う移動のルール
@@ -100,7 +110,27 @@ class Navigator {
   async moveTo(goal, movementsFactory = this.movementsFactory) {
     const generation = ++this.generation
     const deadline = Date.now() + this.timeout
+    const { stalled, ...result } = await this.#move(goal, movementsFactory, generation, deadline)
+    if (result.status !== 'failed' || !this.escape) return result
+    const cancelled = () => generation !== this.generation
+    let escaped = false
+    try {
+      escaped = await escape(this.bot, { ...this.escape, stalled, isCancelled: cancelled })
+    } catch (err) {
+      console.error('動けない状態から抜け出せませんでした:', err.message)
+    }
+    if (cancelled()) return { status: 'cancelled' }
+    if (!escaped) return result
+    // 抜け出せたら、時間の上限を数え直して、もう一度だけ移動する
+    const retried = await this.#move(goal, movementsFactory, generation, Date.now() + this.timeout)
+    delete retried.stalled
+    return retried
+  }
+
+  // 移動して、着いたかを確かめる。止まったら、体を中央に戻してやり直す。stalled は、経路の途中で止まったことがあるか
+  async #move(goal, movementsFactory, generation, deadline) {
     let failure = null
+    let stalledOnce = false
     try {
       this.bot.pathfinder.setMovements(movementsFactory(this.bot))
       for (let attempt = 1; ; attempt++) {
@@ -110,6 +140,7 @@ class Navigator {
           failure = error
           break
         }
+        stalledOnce = true
         if (attempt >= this.attempts || Date.now() >= deadline) {
           failure = new Error('移動の途中で動けなくなりました')
           break
@@ -124,7 +155,7 @@ class Navigator {
     // 道がない場合でも goto が成功として終わることがあるため、着いた場所を確かめる
     if (!failure && goal.isEnd(this.bot.entity.position.floored())) return { status: 'arrived' }
     this.bot.pathfinder.setGoal(null)
-    return { status: 'failed', reason: failure?.message }
+    return { status: 'failed', reason: failure?.message, stalled: stalledOnce }
   }
 
   /**

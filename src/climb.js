@@ -18,9 +18,56 @@ const CENTER_TICKS = 40
 const CENTER_TOLERANCE = 0.15
 
 const UP = new Vec3(0, 1, 0)
-// 足場の柱を積み始める場所として、そのまま立って足場を置ける草花（置くと消える）
-const PASSABLE_PLANTS = new Set(['short_grass', 'tall_grass', 'fern', 'large_fern', 'dead_bush', 'short_dry_grass', 'tall_dry_grass', 'bush'])
+// ブロックを置くと、置いたブロックに置き換わる草（マインクラフトの replaceable）
+const REPLACEABLE_PLANTS = [
+  'short_grass',
+  'tall_grass',
+  'fern',
+  'large_fern',
+  'dead_bush',
+  'short_dry_grass',
+  'tall_dry_grass',
+  'bush',
+  'vine',
+  'glow_lichen',
+  'hanging_roots',
+  'crimson_roots',
+  'warped_roots',
+  'nether_sprouts'
+]
+// 当たり判定がなく、素手ですぐ刈れる草花。足場を置く場所にあれば、先に刈る（花は置き換わらないため）
+// 苗木は、植え直した物かもしれないため含めない
+const PLANTS = new Set([
+  ...REPLACEABLE_PLANTS,
+  'dandelion',
+  'poppy',
+  'blue_orchid',
+  'allium',
+  'azure_bluet',
+  'red_tulip',
+  'orange_tulip',
+  'white_tulip',
+  'pink_tulip',
+  'oxeye_daisy',
+  'cornflower',
+  'lily_of_the_valley',
+  'torchflower',
+  'closed_eyeblossom',
+  'open_eyeblossom',
+  'sunflower',
+  'lilac',
+  'rose_bush',
+  'peony',
+  'pink_petals',
+  'wildflowers',
+  'leaf_litter',
+  'firefly_bush',
+  'brown_mushroom',
+  'red_mushroom'
+])
 const isAir = (block) => !block || block.name === 'air' || block.name === 'cave_air' || block.name === 'void_air'
+// 当たり判定のない草花か
+const isPlant = (block) => Boolean(block) && PLANTS.has(block.name)
 
 // 条件が満たされるまで、1 tick ずつ待つ
 async function waitUntil(bot, condition, ticks) {
@@ -73,7 +120,9 @@ async function centerOnBlock(bot) {
 async function towerUp(bot) {
   const start = bot.entity.position.floored()
   const below = bot.blockAt(start.offset(0, -1, 0))
-  if (!below || isAir(below)) return null
+  if (!below || isAir(below) || isPlant(below)) return null
+  // 足元の草花は、先に刈る。花などは、ブロックを置いても置き換わらず、足場を置けないため
+  if (!(await clearPlant(bot, start))) return null
   if (!(await centerOnBlock(bot))) return null
   bot.setControlState('jump', true)
   try {
@@ -86,7 +135,26 @@ async function towerUp(bot) {
     bot.setControlState('jump', false)
   }
   await waitUntil(bot, () => bot.entity.onGround, LAND_TICKS)
-  return isAir(bot.blockAt(start)) ? null : start
+  const placed = bot.blockAt(start)
+  return isAir(placed) || isPlant(placed) ? null : start
+}
+
+/**
+ * 指定したマスに草花があれば刈る
+ *
+ * @param {import('mineflayer').Bot} bot
+ * @param {import('vec3').Vec3} position マス
+ * @returns {Promise<boolean>} 草花がなくなっていれば true
+ */
+async function clearPlant(bot, position) {
+  const block = bot.blockAt(position)
+  if (!isPlant(block)) return true
+  try {
+    await bot.dig(block, true)
+  } catch (err) {
+    console.error(`(${position.x}, ${position.y}, ${position.z}) の ${block.name} を刈れませんでした:`, err.message)
+  }
+  return !isPlant(bot.blockAt(position))
 }
 
 /**
@@ -206,7 +274,7 @@ function findPillarSpot(bot, position) {
   for (let y = position.y - 1; y >= position.y - MAX_CLIMB; y--) {
     const block = bot.blockAt(new Vec3(position.x, y, position.z))
     if (!block) return null
-    if (isAir(block) || isNaturalLeaves(block) || PASSABLE_PLANTS.has(block.name)) continue
+    if (isAir(block) || isNaturalLeaves(block) || isPlant(block)) continue
     // 液体の上には立てない
     if (block.name === 'water' || block.name === 'lava') return null
     return new Vec3(position.x, y + 1, position.z)
@@ -214,4 +282,4 @@ function findPillarSpot(bot, position) {
   return null
 }
 
-module.exports = { MAX_CLIMB, centerOnBlock, towerUp, descend, cutFromTrunk, findPillarSpot }
+module.exports = { MAX_CLIMB, REPLACEABLE_PLANTS, isAir, isPlant, clearPlant, centerOnBlock, towerUp, descend, cutFromTrunk, findPillarSpot }
