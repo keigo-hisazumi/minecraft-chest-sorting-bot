@@ -248,10 +248,15 @@ async function replant(context, pending, records) {
  */
 async function climbTree(context, tree, records) {
   const { bot, navigator, signal } = context
+  const notify = context.notify ?? (() => {})
   const [base] = tree.base
+  const failed = (reason) => notify(message.failed('伐採', '高いところの原木', reason))
   const moved = await navigator.moveTo(new goals.GoalBlock(base.x, base.y, base.z), createForestryMovements)
   signal.throwIfAborted()
-  if (moved.status !== 'arrived') return 0
+  if (moved.status !== 'arrived') {
+    failed(`幹の跡 ${formatPosition(base)} へ行けません`)
+    return 0
+  }
   const own = `${tree.type}_log`
   const cut = await cutFromTrunk(bot, tree, {
     dig: async (block) => {
@@ -266,7 +271,8 @@ async function climbTree(context, tree, records) {
       }
       return false
     },
-    isCancelled: () => signal.aborted
+    isCancelled: () => signal.aborted,
+    onStop: failed
   })
   signal.throwIfAborted()
   return cut

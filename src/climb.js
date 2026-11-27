@@ -12,6 +12,10 @@ const MAX_CLIMB = 32
 const JUMP_TICKS = 20
 // 着地するまで待つ時間（tick）
 const LAND_TICKS = 20
+// ブロックの中央へ寄るまで待つ時間（tick）
+const CENTER_TICKS = 40
+// ブロックの中央とみなす、水平のずれ（体の幅 0.6 が、隣の列にかからない大きさ）
+const CENTER_TOLERANCE = 0.15
 
 const UP = new Vec3(0, 1, 0)
 const isAir = (block) => !block || block.name === 'air' || block.name === 'cave_air' || block.name === 'void_air'
@@ -26,6 +30,38 @@ async function waitUntil(bot, condition, ticks) {
 }
 
 /**
+ * 立っているブロックの中央へ寄る
+ * 体が隣の列にかかったままジャンプすると、幹の周りの葉や原木に頭がぶつかり、足元にブロックを置ける高さまで跳べない。
+ * 経路探索は、ブロックの端に体がかかった位置で到着とするため、登る前に中央へ寄せる。
+ * しゃがんだまま歩くため、柱の上でも落ちない。
+ *
+ * @param {import('mineflayer').Bot} bot
+ * @returns {Promise<boolean>} 中央に寄れたか
+ */
+async function centerOnBlock(bot) {
+  const offset = () => {
+    const p = bot.entity.position
+    return Math.hypot(Math.floor(p.x) + 0.5 - p.x, Math.floor(p.z) + 0.5 - p.z)
+  }
+  if (offset() < CENTER_TOLERANCE) return true
+  const cell = bot.entity.position.floored()
+  bot.setControlState('sneak', true)
+  try {
+    for (let i = 0; i < CENTER_TICKS && offset() >= CENTER_TOLERANCE; i++) {
+      const p = bot.entity.position
+      await bot.lookAt(new Vec3(cell.x + 0.5, p.y + 1.6, cell.z + 0.5), true)
+      bot.setControlState('forward', true)
+      await bot.waitForTicks(1)
+    }
+  } finally {
+    bot.setControlState('forward', false)
+    bot.setControlState('sneak', false)
+  }
+  await bot.waitForTicks(2)
+  return offset() < CENTER_TOLERANCE
+}
+
+/**
  * その場でジャンプして、足元にブロックを置き、1 段高くなる
  * 手に置くブロックを持っておくこと。
  *
@@ -36,11 +72,13 @@ async function towerUp(bot) {
   const start = bot.entity.position.floored()
   const below = bot.blockAt(start.offset(0, -1, 0))
   if (!below || isAir(below)) return null
+  if (!(await centerOnBlock(bot))) return null
   bot.setControlState('jump', true)
   try {
     if (!(await waitUntil(bot, () => bot.entity.position.y >= start.y + 1, JUMP_TICKS))) return null
     await bot.placeBlock(below, UP)
-  } catch {
+  } catch (err) {
+    console.error(`足場を ${start} に置けませんでした:`, err.message)
     return null
   } finally {
     bot.setControlState('jump', false)
@@ -81,9 +119,10 @@ async function descend(bot, placed, dig) {
  * @param {(block: object) => Promise<void>} ops.dig ブロックを掘る関数（道具の持ち替えを含む）
  * @param {() => Promise<boolean>} ops.holdBlock 積むブロックを手に持つ関数。持てなければ false
  * @param {() => boolean} [ops.isCancelled] 中止されたかを返す
+ * @param {(reason: string) => void} [ops.onStop] 原木を残したまま登るのをやめたときに、理由を渡して呼ぶ
  * @returns {Promise<number>} 切った原木の数
  */
-async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => false }) {
+async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => false, onStop = () => {} }) {
   const name = `${tree.type}_log`
   const placed = []
   // 積んだブロックは、同じ原木でも切る対象にしない
@@ -113,17 +152,37 @@ async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => fal
       // 手が届かないので、1 段登る。頭の上をふさぐ原木と自然の葉は掘る
       const feet = bot.entity.position.floored()
       const top = Math.max(...left.map((p) => p.y))
-      if (feet.y >= top || feet.y - column.y >= MAX_CLIMB) break
+      const stop = (reason) => onStop(`${reason}（残り ${left.length} 個）`)
+      if (feet.y >= top) {
+        stop('幹から手が届かない位置にあります')
+        break
+      }
+      if (feet.y - column.y >= MAX_CLIMB) {
+        stop(`登れる高さ（${MAX_CLIMB} ブロック）を超えます`)
+        break
+      }
       const head = bot.blockAt(feet.offset(0, 2, 0))
       if (!isAir(head)) {
-        if (head.name !== name && !isNaturalLeaves(head)) break
+        if (head.name !== name && !isNaturalLeaves(head)) {
+          stop(`頭の上に ${head.name} があります`)
+          break
+        }
         await dig(head)
-        if (!isAir(bot.blockAt(feet.offset(0, 2, 0)))) break
+        if (!isAir(bot.blockAt(feet.offset(0, 2, 0)))) {
+          stop('頭の上のブロックを掘れません')
+          break
+        }
         if (head.name === name) cut++
       }
-      if (!(await holdBlock())) break
+      if (!(await holdBlock())) {
+        stop('足場にするブロックを持っていません')
+        break
+      }
       const position = await towerUp(bot)
-      if (!position) break
+      if (!position) {
+        stop('足場を置けません')
+        break
+      }
       placed.push(position)
     }
   } finally {
@@ -132,4 +191,4 @@ async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => fal
   return cut
 }
 
-module.exports = { MAX_CLIMB, towerUp, descend, cutFromTrunk }
+module.exports = { MAX_CLIMB, centerOnBlock, towerUp, descend, cutFromTrunk }
