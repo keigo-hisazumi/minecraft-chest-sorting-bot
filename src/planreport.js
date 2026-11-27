@@ -80,6 +80,14 @@ function formatDetail(plan, failed) {
  */
 function formatResult(result) {
   const lines = [result.delivered > 0 ? `整理しました: ${result.delivered} 個を移しました` : '移せるアイテムはありません']
+  const { expanded = 0, created = 0, tablePlaced = false, problems = [] } = result.build ?? {}
+  const done = [
+    ...(created > 0 ? [`大きなチェストを ${created} 個置きました`] : []),
+    ...(expanded > 0 ? [`単体チェストを ${expanded} 個広げました`] : []),
+    ...(tablePlaced ? ['作業台を置きました'] : [])
+  ]
+  if (done.length > 0) lines.push(done.join('。'))
+  lines.push(...problems)
   if (result.shortage.length > 0) lines.push(`専用にする大きなチェストが足りないため残しています: ${shorten(result.shortage)}`)
   if (result.missingChests > 0) lines.push(`混合または保護対象のチェストが ${result.missingChests} 個足りません`)
   if (result.sourceItems > 0) lines.push(`指定チェストに ${result.sourceItems} 個残っています`)

@@ -210,11 +210,13 @@ class SortController {
             ...context,
             saveAssignments: (assignments) => this.store.set(key, { ...this.store.get(key), assignments })
           })
-          signature = { value: result.signature, retry: result.failed.length > 0 }
+          const unfinished = result.failed.length > 0 || (result.build?.problems.length ?? 0) > 0
+          signature = { value: result.signature, retry: unfinished }
           polls = 0
           const lines = formatResult(result)
-          // 何も移さず、前回と同じ内容なら、繰り返して知らせない
-          if (result.delivered > 0 || lines.join('\n') !== reported) tell(lines)
+          const placed = (result.build?.expanded ?? 0) + (result.build?.created ?? 0)
+          // 何も移さず置かず、前回と同じ内容なら、繰り返して知らせない
+          if (result.delivered > 0 || placed > 0 || lines.join('\n') !== reported) tell(lines)
           reported = lines.join('\n')
         }
       } catch (err) {
