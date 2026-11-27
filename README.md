@@ -1,76 +1,99 @@
-# Template
+# minecraft-chest-sorting-bot
 
-このリポジトリは新しいプロジェクト用のテンプレートです。AI アシスタント向けの指示書、Issue / PR テンプレート、CI/CD の雛形、エディタ設定、各種ドット・ガバナンスファイルを含みます。
+整理に使うチェストをゲーム内チャットで登録して保存する Minecraft BOT です。
 
-## AI アシスタント運用方針
+## 主な機能
 
-このテンプレートは **Claude をメインの AI アシスタント** として利用し、**GitHub Copilot をサブツール** として併用するワークフローを想定しています。開発ルールの **正本は [`AGENTS.md`](./AGENTS.md)** で、各ツール向けの指示書はそれを参照する構成です。
-
-| ツール | ファイル | 役割 |
-| --- | --- | --- |
-| 汎用 AI エージェント | [`AGENTS.md`](./AGENTS.md) | **正本**。すべてのルールはここに集約 |
-| Claude Code | [`CLAUDE.md`](./CLAUDE.md) | `AGENTS.md` を参照 |
-
-## 含まれるもの
-
-### AI 向け指示書
-
-- `AGENTS.md` — **正本**（汎用 AI エージェント向け）
-- `CLAUDE.md` — Claude Code 向け（`AGENTS.md` を参照）
-
-### Issue / PR
-
-- `.github/ISSUE_TEMPLATE/` — バグ報告 / 機能要望 / 質問テンプレート
-- `.github/PULL_REQUEST_TEMPLATE.md` — PR テンプレート（日本語）
-- `.github/CODEOWNERS` — レビュー自動アサイン
-- `CONTRIBUTING.md` / `SECURITY.md` — 貢献ガイドとセキュリティポリシー
-
-### CI/CD
-
-- `.github/workflows/ci.yml` — PR 時の lint / typecheck / test / build（`package.json` がある場合のみ実行）
-- `.github/workflows/actionlint.yml` — workflow 自体の Lint（公式バイナリをバージョン固定で実行。`.github/actionlint-matcher.json` でエラー行に注釈を付ける）
-- `.github/workflows/markdownlint.yml` — Markdown の書き方チェック（ルールは `.markdownlint-cli2.jsonc`、内容は `AGENTS.md` の「Markdown の書き方」）
-- `.github/workflows/codeql.yml` — セキュリティスキャン（workflow 定義は常に、JS/TS は ソースがある場合のみ解析）
-- `.github/workflows/deploy.yml` — main への PR マージ時に GitHub Pages へデプロイ
-- `.github/workflows/pr-preview.yml` — PR ごとのプレビュー環境（`pr-<番号>/`）を gh-pages にデプロイし、URL と QR コードをコメント
-- `.github/workflows/release-drafter.yml` + `.github/release-drafter.yml` — main へのマージごとにリリースノート草案を更新（PR タイトルの Conventional Commits プレフィックスで分類）
-- `.github/workflows/pr-title.yml` — PR タイトルが Conventional Commits 形式（例: `feat: 〜`）かを検証
-- `.github/workflows/screenshot.yml` — PR スクリーンショット用 Playwright 雛形
-- `.github/dependabot.yml` — 依存関係の自動更新
-
-### 環境差異の吸収
-
-- `.editorconfig` — エディタ間のインデント／改行統一
-- `.markdownlint-cli2.jsonc` — Markdown の書き方ルール
-- `.gitattributes` — テキスト/バイナリ・改行コードの正規化
-- `.gitignore` — OS / 言語 / ビルド成果物
-- `.vscode/extensions.json`, `.vscode/settings.json` — VSCode 推奨拡張・設定
-
-### その他
-
-- `LICENSE` — MIT
+- Minecraft Java Edition のサーバーに BOT として接続し、切断されたら再接続する
+- チャットコマンドで整理元の指定チェストを登録する（指定がなければ一番近いチェストを登録する）
+- チャットコマンドで触れてはいけないチェストを除外する
+- 登録内容と開始の状態を保存し、再起動後も引き継ぐ
+- チャットコマンドで BOT をプレイヤーのそばへ呼び寄せ、現在位置を確認する
+- この版では、BOT はアイテムの操作をしない
 
 ## 使い方
 
-1. このテンプレートから新しいリポジトリを作成（GitHub の **Use this template** ボタン、または clone）。
-2. `README.md` を `AGENTS.md` の「README の構成」に沿って書き換え、`CODEOWNERS`、`LICENSE` のプロジェクト名や著作権者を書き換える。
-3. 言語/フレームワークが決まったら以下を有効化:
-   - `.github/workflows/ci.yml` は `lint` / `type-check` / `build` の npm script を実行する（`lint` / `type-check` はスクリプトがなければスキップ、`build` は必須）。テストを追加したら Test ジョブのプレースホルダーを差し替える
-   - `.github/workflows/codeql.yml` で JS/TS 以外の言語を解析する場合は detect ジョブの判定を追加
-   - `.github/workflows/deploy.yml` / `pr-preview.yml` のベースパス変数名（既定は Vite の `VITE_BASE_PATH`）と `publish_dir` を確認
-   - Vite の場合は `vite.config.ts` に `base: process.env.VITE_BASE_PATH ?? '/'` を追加する（未設定だと GitHub Pages 上でアセットが 404 になり画面が真っ白になる）
-   - アイコンを使う Web アプリでは、`AGENTS.md` の「アプリのアイコン」に沿って `public/icon.svg`・`pwa-assets.config.js`・`icons` スクリプトを追加する（`npm i -D @vite-pwa/assets-generator`）
-   - `.github/workflows/screenshot.yml` は Playwright 導入後、リポジトリ変数 `ENABLE_SCREENSHOT` を `true` に設定して有効化
-   - `.github/dependabot.yml` の対応する `package-ecosystem` のコメントアウトを外す（typescript-eslint を使わない場合は typescript の `ignore` を削除）
-4. **リポジトリ作成後の手動設定**（テンプレートに含められないため `README` で案内）:
-   - `main` ブランチ保護ルールを設定（PR 必須、CI パス必須、force push 禁止）
-   - GitHub Actions の権限を `Read and write` 許可（Release Drafter / GitHub Pages デプロイ / PR プレビュー用）
-   - GitHub Pages のソースを `gh-pages` ブランチに設定（`deploy.yml` / `pr-preview.yml` を使う場合）
-   - Secret スキャン / Dependabot Alerts を有効化
+1. Minecraft Java Edition 1.21.11 のテスト用サーバーを起動する（サーバーの条件は [仕様書](./docs/spec.md) の「動作環境」を参照する）
+2. `.env.example` を `.env` にコピーし、接続先を設定する
+3. `npm start` で BOT を起動する
+4. クライアントから同じサーバーに入り、BOT が「SortBot 起動」と発言することを確かめる
+5. 指定チェストの近くで、チャットコマンドを発言する
 
-## VSCode 環境
+## チャットコマンド
 
-VSCode をエディタとして使うワークフローを想定しています。`.vscode/extensions.json` に記載の拡張をインストールすると、Lint / Format / Spell check が即座に動きます。
+命令は、BOT 自身を除くすべてのプレイヤーから受け付けます。
+
+| コマンド | 動作 |
+| --- | --- |
+| `sort chest <x> <y> <z>` | 指定した座標のチェストを指定チェストとして登録する。登録し直すと上書きする |
+| `sort exclude <x> <y> <z>` | 指定した座標のチェストを除外する。指定チェストは除外できない |
+| `sort start` | 整理を開始の状態にする。指定チェストがない場合は一番近いチェストを登録するので、もう一度発言する |
+| `sort stop` | 整理を停止の状態にし、移動も中止する |
+| `sort status` | 状態、指定チェスト、除外したチェストを答える |
+| `sort come` | 発言したプレイヤーが今いる場所のそばへ移動する。移動中はブロックを壊さず、足場も置かない |
+| `sort pos` | BOT の現在地の座標を答える |
+
+- 対象は通常のチェストだけです。大きなチェストは、どちらの座標を指定しても 1 つのチェストとして扱います
+- BOT の周囲で読み込まれていない座標は登録できません
+- 一番近いチェストは、BOT から水平 32 ブロック、上下 8 ブロックの範囲で探します
+- 登録内容は、接続先とディメンションごとに `data/state.json` へ保存します（Git の対象外）
+- 除外を取り消すコマンドはありません。取り消すときは、BOT を停止して `data/state.json` の `excluded` から該当する座標を削除します
+- ワールドを作り直した場合は、`data/state.json` を削除します
+- `data/state.json` が壊れている場合、BOT は起動しません
+
+## 仕様
+
+設計は [仕様書](./docs/spec.md) にまとめています。
+
+## 技術スタック
+
+- Node.js
+- mineflayer（Minecraft BOT ライブラリ）
+- mineflayer-pathfinder（経路探索と移動）
+- vec3（座標計算）
+
+## 開発
+
+### 必要な環境
+
+- Node.js 22 以降
+- Minecraft Java Edition のサーバーとクライアント（動作確認用）
+
+### コマンド
+
+```bash
+npm ci          # 依存関係のインストール
+npm start       # BOT を起動する
+npm test        # テストを実行する
+npm run build   # src/ と scripts/ の構文を検査する
+```
+
+## ディレクトリ構成
+
+```text
+.
+├── src/
+│   ├── index.js          # BOT のエントリーポイント（接続と再接続）
+│   ├── config.js         # 接続設定（環境変数から読み込む）
+│   ├── commands.js       # チャットコマンドの解釈
+│   ├── controller.js     # コマンドの実行
+│   ├── chests.js         # チェストの判定と検索
+│   ├── navigation.js     # プレイヤーのそばへの移動
+│   └── state.js          # 登録情報の保存
+├── scripts/
+│   └── check-syntax.js   # 構文検査（CI の build で実行）
+├── docs/
+│   └── spec.md           # 仕様書
+└── .env.example          # 接続設定の雛形
+```
+
+## デプロイ
+
+デプロイはありません。BOT は手元の PC で起動し、Minecraft サーバーに接続して動かします。
+
+## 開発ルール
+
+[AGENTS.md](./AGENTS.md) を参照してください。
 
 ## ライセンス
 

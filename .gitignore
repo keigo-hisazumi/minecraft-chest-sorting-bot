@@ -68,6 +68,9 @@ __screenshots__/
 .vercel
 .wrangler
 
+# BOT が保存する登録情報
+data/
+
 # アプリのアイコン（public/icon.svg から npm run icons で生成する。AGENTS.md「アプリのアイコン」参照）
 public/favicon.ico
 public/pwa-*x*.png
