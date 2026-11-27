@@ -305,4 +305,4 @@ async function placeTable(context) {
   return null
 }
 
-module.exports = { buildChests, planBuild }
+module.exports = { buildChests, planBuild, findTable }

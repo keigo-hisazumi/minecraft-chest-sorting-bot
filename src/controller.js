@@ -1,4 +1,4 @@
-// コマンドの実行（チェストの登録・除外、整理の開始と停止、調査と計画の表示、植え直し、呼び寄せと現在位置の報告）
+// コマンドの実行（チェストの登録・除外、整理の開始と停止、調査と計画の表示、伐採、植え直し、呼び寄せと現在位置の報告）
 // 整理を開始している間は、指定チェストを定期的に確認して、中身が変わったら整理する。
 
 const fs = require('node:fs')
@@ -7,22 +7,32 @@ const { setTimeout: sleep } = require('node:timers/promises')
 const { Vec3 } = require('vec3')
 const { CHEST_NAME, chestPositions, findNearestChest, sortPositions, formatPosition, formatChest, samePosition, overlaps } = require('./chests')
 const { HELP } = require('./commands')
-const { replant } = require('./forester')
+const { findTable } = require('./builder')
+const { TREE_LIMIT, gatherWood, replant } = require('./forester')
 const { buildPlan } = require('./plan')
 const { formatSummary, formatDetail, formatResult } = require('./planreport')
 const { sortOnce, readSourceSignature } = require('./sorter')
 const { surveyChests } = require('./survey')
 
 // 調査やアイテムの移動をしている間は受け付けないコマンド（移動や登録内容が食い違うため）
-const BLOCKED_WHILE_BUSY = new Set(['start', 'plan', 'replant', 'chest', 'exclude', 'come'])
+const BLOCKED_WHILE_BUSY = new Set(['start', 'plan', 'replant', 'fell', 'chest', 'exclude', 'come'])
 // 整理を開始している間は、次の確認を待っているときも受け付けないコマンド
-const BLOCKED_WHILE_SORTING = new Set(['start', 'plan', 'replant'])
+const BLOCKED_WHILE_SORTING = new Set(['start', 'plan', 'replant', 'fell'])
 // 実行中の作業の呼び方
-const TASK_NAMES = { sort: '整理', plan: '調査', replant: '植え直し' }
+const TASK_NAMES = { sort: '整理', plan: '調査', replant: '植え直し', fell: '伐採' }
 // 指定チェストを確認する間隔（ミリ秒）
 const POLL_INTERVAL_MS = 30000
 // 使えないチェストがあった場合に、中身が変わらなくても整理をやり直すまでの確認の回数
 const RETRY_POLLS = 10
+
+/**
+ * BOT の周りの木を、指定した本数だけ切る（sort fell の既定の処理）
+ * 原木の量の目標は設けず、本数に達するか、切れる木がなくなるか、持ち物の空きがなくなるまで切る。
+ * 斧は持ち物の物を使う。なければ、範囲内に作業台があれば作り、作れなければ素手で切る。
+ */
+function fellTrees(context, count, { pending, savePending }) {
+  return gatherWood(context, { wanted: Infinity, maxTrees: count, records: [], pending, savePending })
+}
 
 class SortController {
   /**
@@ -37,6 +47,7 @@ class SortController {
    * @param {{ sortOnce: typeof sortOnce, readSourceSignature: typeof readSourceSignature }} [options.sorter] 整理を行うもの
    * @param {number} [options.pollInterval] 指定チェストを確認する間隔（ミリ秒）
    * @param {typeof replant} [options.replanter] 苗木を植え直す関数
+   * @param {typeof fellTrees} [options.feller] 周りの木を指定した本数だけ切る関数
    * @param {string} [options.discardLog] 廃棄を記録するファイル。なければ廃棄しない
    */
   constructor(
@@ -51,10 +62,12 @@ class SortController {
       sorter = { sortOnce, readSourceSignature },
       pollInterval = POLL_INTERVAL_MS,
       replanter = replant,
+      feller = fellTrees,
       discardLog
     }
   ) {
     this.replanter = replanter
+    this.feller = feller
     this.discardLog = discardLog
     this.bot = bot
     this.store = store
@@ -77,7 +90,7 @@ class SortController {
   /**
    * コマンドを実行し、チャットで返す文を返す
    *
-   * @param {{ type: string, position?: { x: number, y: number, z: number } }} command
+   * @param {{ type: string, position?: { x: number, y: number, z: number }, count?: number }} command
    * @param {string} username 発言したプレイヤー名
    * @returns {string[]} すぐに返す文
    */
@@ -89,6 +102,8 @@ class SortController {
         return this.plan()
       case 'replant':
         return this.replant()
+      case 'fell':
+        return this.fell(command.count)
       case 'come':
         return this.come(username)
       case 'pos':
@@ -366,6 +381,48 @@ class SortController {
       if (signal.aborted) return
       console.error('植え直しに失敗しました:', err)
       this.report(`植え直しに失敗しました: ${err.message}`)
+    }
+  }
+
+  // BOT の周りの木を、指定した本数だけ切る。結果は、終わり次第 report で知らせる
+  fell(count) {
+    if (!Number.isInteger(count) || count < 1 || count > TREE_LIMIT) return [`本数は 1 から ${TREE_LIMIT} で指定してください`]
+    const key = this.worldKey
+    const world = this.store.get(key)
+    this.navigator.cancel()
+    const task = { type: 'fell', abort: new AbortController(), busy: true }
+    this.task = task
+    task.done = this.runFell(key, world, count, task.abort.signal).finally(() => {
+      this.task = null
+    })
+    return [`周りの木を ${count} 本切ります。やめるときは sort stop と発言してください`]
+  }
+
+  async runFell(key, world, count, signal) {
+    // 木を探す範囲は、今いる場所を中心にする（指定チェストの範囲ではない）
+    const center = this.bot.entity.position.floored()
+    const context = { bot: this.bot, navigator: this.navigator, signal, center, failed: [], notify: this.report }
+    // 斧を作るときは、範囲内にある作業台を使う。新しくは置かない
+    let table
+    context.getTable = async () => (table ??= await findTable(context))
+    try {
+      const result = await this.feller(context, count, {
+        pending: world.replant ?? [],
+        savePending: (spots) => this.saveReplant(key, spots)
+      })
+      const lines = [`伐採しました: ${result.trees} 本（原木 ${result.logs} 個）`]
+      if (result.trees < count) {
+        lines.push(result.exhausted ? '周りに切れる木が残っていません' : '持ち物の空きがなくなったため、途中でやめました')
+      }
+      if (result.tall > 0) lines.push(`大きすぎて切らなかった木: ${result.tall} 本`)
+      if (result.barehanded) lines.push('斧を用意できなかったため、素手で切りました')
+      if (result.pending.length > 0) lines.push(`植え直すときは sort replant と発言してください（${result.pending.length} か所）`)
+      for (const line of lines) this.report(line)
+    } catch (err) {
+      // 中止した場合は知らせない。切った場所は記録してある
+      if (signal.aborted) return
+      console.error('伐採に失敗しました:', err)
+      this.report(`伐採に失敗しました: ${err.message}`)
     }
   }
 
