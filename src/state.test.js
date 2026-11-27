@@ -29,6 +29,13 @@ test('苗木を植え直す場所を保存する。ない登録も読み込め�
   assert.equal(reloaded.get('b').replant, undefined)
 })
 
+test('版 2 の登録は、振り分け先を引き継ぎ、開始の状態だけを停止にする', (t) => {
+  const file = temporaryFile(t)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify({ version: 2, worlds: { a: world } }))
+  assert.deepEqual(new StateStore(file).get('a'), { ...world, running: false })
+})
+
 test('版 1 の登録は引き継ぎ、開始の状態だけを停止にする', (t) => {
   const file = temporaryFile(t)
   fs.mkdirSync(path.dirname(file), { recursive: true })

@@ -92,6 +92,13 @@ test('同じ枠にまとめられるかは、付加情報で見分ける（並�
   assert.notEqual(describeItem(item('iron_sword', [a])).variant, describeItem(item('iron_sword')).variant)
 })
 
+test('中身のある入れ物は保護する', () => {
+  const bundle = { type: 'bundle_contents', data: { contents: [{ itemCount: 1 }] } }
+  assert.ok(describeItem(item('bundle', [bundle])).protected)
+  assert.ok(describeItem(item('barrel', [{ type: 'container', data: {} }])).protected)
+  assert.ok(!describeItem(item('bundle', [{ type: 'bundle_contents', data: { contents: [] } }])).protected)
+})
+
 test('最大スタック数の付加情報があれば優先する', () => {
   assert.equal(describeItem(item('stick', [{ type: 'max_stack_size', data: 16 }])).stackSize, 16)
   assert.equal(describeItem(item('stick')).stackSize, 64)

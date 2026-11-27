@@ -6,7 +6,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 // 2: 振り分け先を追加。開始の状態でアイテムを動かすようになった
-const FORMAT_VERSION = 2
+// 3: 開始の状態でアイテムを廃棄するようになった
+const FORMAT_VERSION = 3
 
 /**
  * 何も割り当てていない振り分け先を作る
@@ -45,8 +46,8 @@ const isWorld = (w) =>
   isAssignments(w.assignments) &&
   isReplant(w.replant)
 
-// 版 1 の開始の状態は、アイテムを動かさなかったときの指示のため、引き継がずに停止にする
-const upgradeFromVersion1 = (world) => ({ ...world, running: false, assignments: emptyAssignments() })
+// 以前の版の開始の状態は、今の版の動作（廃棄を含む）を指示したものではないため、引き継がずに停止にする
+const upgrade = (version, world) => ({ ...world, running: false, ...(version === 1 && { assignments: emptyAssignments() }) })
 
 /**
  * 登録情報を扱うクラス
@@ -106,9 +107,10 @@ function load(file) {
     throw new Error(`登録情報が壊れています（${file}）: ${err.message}`)
   }
   const invalid = new Error(`登録情報の形式が正しくありません（${file}）`)
-  if (![1, FORMAT_VERSION].includes(data?.version) || typeof data.worlds !== 'object' || data.worlds === null) throw invalid
+  if (![1, 2, FORMAT_VERSION].includes(data?.version) || typeof data.worlds !== 'object' || data.worlds === null) throw invalid
   const entries = Object.entries(data.worlds)
-  const worlds = Object.fromEntries(data.version === 1 ? entries.map(([key, world]) => [key, upgradeFromVersion1(world)]) : entries)
+  const old = data.version !== FORMAT_VERSION
+  const worlds = Object.fromEntries(old ? entries.map(([key, world]) => [key, upgrade(data.version, world)]) : entries)
   if (!Object.values(worlds).every(isWorld)) throw invalid
   return worlds
 }

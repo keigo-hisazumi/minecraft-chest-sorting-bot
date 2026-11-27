@@ -21,6 +21,9 @@ function createMovements(bot) {
   // mineflayer-pathfinder のプロパティ名は綴りが誤っている（scafoldingBlocks）。
   // これを空にしないと、ブロックを置いて橋渡しする経路が選ばれる
   movements.scafoldingBlocks = []
+  // サボテンに触れる経路は通らない
+  const cactus = bot.registry.blocksByName.cactus
+  if (cactus) movements.blocksToAvoid.add(cactus.id)
   return movements
 }
 

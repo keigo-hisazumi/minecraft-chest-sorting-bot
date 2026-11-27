@@ -1,13 +1,14 @@
 // アイテムの移動
 // 指定チェストと整理先を調査して振り分け先を決め、BOT のインベントリを使ってアイテムを移す。
-// 足りないチェストは、移す前に作って置く。
+// 足りないチェストは移す前に作って置き、専用チェストに入りきらない分は移したあとに廃棄する。
 
 const { goals } = require('mineflayer-pathfinder')
 const { buildChests } = require('./builder')
 const { formatPosition, overlaps } = require('./chests')
-const { describeItem } = require('./items')
-const { createLayout, sameKind, destinationFor, evictableStacks, movableStacks } = require('./moves')
+const { discardOverflow } = require('./discard')
+const { createLayout, destinationFor, movableStacks } = require('./moves')
 const { buildPlan } = require('./plan')
+const { storeStack } = require('./store')
 const { surveyChests, readChest } = require('./survey')
 const { toChest, readCargo, cargoStacks, emptyCargoSlots, refresh, moveStack, withChest } = require('./window')
 
@@ -19,46 +20,6 @@ const STALL_LIMIT = 3
 const VISIT_LIMIT = 1000
 // 整理のあとに待つ場所の、指定チェストからの距離（ブロック）
 const WAIT_DISTANCE = 4
-
-// チェストの中で、アイテムを足せる枠（同じアイテムの枠を先に使う）
-function roomSlot(chest, stack) {
-  const partial = [...chest.slots.values()].find((s) => sameKind(s, stack) && s.count < s.stackSize)
-  if (partial) return partial.slot
-  for (let slot = 0; slot < chest.size; slot++) {
-    if (!chest.slots.has(slot)) return slot
-  }
-  return null
-}
-
-/**
- * 持っている 1 枠分のアイテムを、開いているチェストへ入れる
- * 整理先に空きがなければ、よそへ移すアイテムを取り出して空ける。指定チェストからは取り出さない。
- *
- * @returns {Promise<{ stored: number, taken: number }>} 入れた個数と、空けるために取り出した個数
- */
-async function storeStack({ bot, signal, layout, source }, window, chest, cargoSlot) {
-  const result = { stored: 0, taken: 0 }
-  while (window.slots[cargoSlot]) {
-    signal.throwIfAborted()
-    const stack = describeItem(window.slots[cargoSlot])
-    const target = roomSlot(chest, stack)
-    if (target !== null) {
-      const moved = await moveStack(bot, window, cargoSlot, target)
-      refresh(chest, window)
-      result.stored += moved
-      if (moved === 0) break
-      continue
-    }
-    const evict = chest === source ? undefined : evictableStacks(layout, chest)[0]
-    const empty = emptyCargoSlots(window)[0]
-    if (!evict || empty === undefined) break
-    const moved = await moveStack(bot, window, evict.slot, empty)
-    refresh(chest, window)
-    result.taken += moved
-    if (moved === 0) break
-  }
-  return result
-}
 
 // 荷物を届け、必要ならよそへ移すアイテムを持ち出す
 async function visit(context, chest, { pickup }) {
@@ -155,11 +116,24 @@ async function carry(context, chests) {
  * @param {(assignments: object) => void} options.saveAssignments 決めた振り分け先を保存する関数
  * @param {AbortSignal} options.signal 中止の合図
  * @param {typeof buildChests} [options.build] 足りないチェストを作る関数
+ * @param {string} [options.discardLog] 廃棄を記録するファイル。なければ廃棄しない
+ * @param {typeof discardOverflow} [options.discard] 入りきらないアイテムを廃棄する関数
  * @returns {Promise<{ delivered: number, shortage: string[], missingChests: number, sourceItems: number,
- *   carried: number, misplaced: number, failed: object[], build: object, signature: string }>} 整理の結果。
+ *   carried: number, misplaced: number, failed: object[], build: object, discard: object, signature: string }>} 整理の結果。
  *   sourceItems は指定チェストに残った個数、misplaced は整理先に残った移すべきアイテムの枠の数
  */
-async function sortOnce({ bot, navigator, world, saveAssignments, saveReplant, notify, signal, build = buildChests }) {
+async function sortOnce({
+  bot,
+  navigator,
+  world,
+  saveAssignments,
+  saveReplant,
+  notify = () => {},
+  signal,
+  build = buildChests,
+  discardLog,
+  discard = discardOverflow
+}) {
   const inspect = () => surveyChests({ bot, navigator, source: world.source.positions, excluded: world.excluded, signal })
   let survey = await inspect()
   const built = await build({ bot, navigator, survey, world, signal, saveReplant, notify })
@@ -185,8 +159,11 @@ async function sortOnce({ bot, navigator, world, saveAssignments, saveReplant, n
   // 専用にするのにチェストがないアイテムは、混合チェストへ入れずに、今の場所に残す
   const waiting = Object.fromEntries(plan.dedicated.map((d) => [d.name, null]))
   const layout = createLayout({ ...assignments, dedicated: { ...waiting, ...assignments.dedicated } }, chests)
-  const context = { bot, navigator, signal, layout, source, failed }
-  const delivered = await carry(context, chests)
+  const context = { bot, navigator, signal, layout, source, failed, notify }
+  let delivered = await carry(context, chests)
+  const discarded = await discard(context, { chests, center: source.positions[0], logFile: discardLog })
+  // 廃棄のために取り出した分や、入れ替えた分を片付ける
+  if (discarded.changed) delivered += await carry(context, chests)
   await navigator.moveTo(new goals.GoalNear(source.positions[0].x, source.positions[0].y, source.positions[0].z, WAIT_DISTANCE))
   signal.throwIfAborted()
 
@@ -199,6 +176,7 @@ async function sortOnce({ bot, navigator, world, saveAssignments, saveReplant, n
     misplaced: chests.reduce((count, c) => count + movableStacks(layout, c).length, 0),
     failed,
     build: built,
+    discard: discarded,
     signature: signatureOf(source.positions, [...source.slots.values()])
   }
 }

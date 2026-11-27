@@ -51,6 +51,13 @@ function hasEnchantments(component) {
   return Array.isArray(list) ? list.length > 0 : true
 }
 
+// 中にアイテムを入れる入れ物で、中身がある（または形式が分からない）か
+function hasContents(component) {
+  if (!component) return false
+  const list = Array.isArray(component.data) ? component.data : component.data?.contents
+  return Array.isArray(list) ? list.length > 0 : true
+}
+
 const toJson = (value) => JSON.stringify(value, (key, v) => (typeof v === 'bigint' ? String(v) : v))
 
 /**
@@ -67,7 +74,10 @@ function describeItem(item) {
     components.has('custom_name') ||
     Boolean(item.customName) ||
     hasEnchantments(components.get('enchantments')) ||
-    hasEnchantments(components.get('stored_enchantments'))
+    hasEnchantments(components.get('stored_enchantments')) ||
+    // 中に保護対象が入っていることがあるため、中身のある入れ物は捨てない
+    hasContents(components.get('container')) ||
+    hasContents(components.get('bundle_contents'))
   const sorted = [...(item.components ?? [])].sort((a, b) => String(a.type).localeCompare(String(b.type)))
   const removed = (item.removedComponents ?? []).map(toJson).sort()
   return {
