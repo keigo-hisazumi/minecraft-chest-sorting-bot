@@ -3,7 +3,7 @@
 
 const mineflayer = require('mineflayer')
 const { pathfinder } = require('mineflayer-pathfinder')
-const { createConfig, STATE_FILE } = require('./config')
+const { createConfig, STATE_FILE, PLAN_FILE } = require('./config')
 const { parseCommand } = require('./commands')
 const { SortController } = require('./controller')
 const { Navigator } = require('./navigation')
@@ -22,7 +22,9 @@ function connect() {
   bot.loadPlugin(pathfinder)
   const controller = new SortController(bot, store, `${config.host}:${config.port}`, {
     navigator: new Navigator(bot),
-    report: (message) => bot.chat(message)
+    // 切断したあとは発言できないため、記録だけにする
+    report: (message) => (ready ? bot.chat(message) : console.log(message)),
+    planFile: PLAN_FILE
   })
   // 周囲のチャンクが読み込まれるまでは、チェストを確認できない
   let ready = false
@@ -60,6 +62,7 @@ function connect() {
   bot.on('error', (err) => console.error('エラー:', err.message || err.code || err))
   bot.once('end', (reason) => {
     ready = false
+    controller.dispose()
     console.log(`切断されました: ${reason}。${RECONNECT_DELAY_MS / 1000} 秒後に再接続します`)
     setTimeout(connect, RECONNECT_DELAY_MS)
   })

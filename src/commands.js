@@ -1,9 +1,9 @@
 // チャットコマンドの解釈
 // 他の BOT と衝突しないように、すべて `sort` で始める。
 
-const HELP = '使い方: sort start / sort stop / sort status / sort come / sort pos / sort chest <x> <y> <z> / sort exclude <x> <y> <z>'
+const HELP = '使い方: sort start / sort stop / sort status / sort plan / sort come / sort pos / sort chest <x> <y> <z> / sort exclude <x> <y> <z>'
 
-const SIMPLE_COMMANDS = new Set(['start', 'stop', 'status', 'come', 'pos'])
+const SIMPLE_COMMANDS = new Set(['start', 'stop', 'status', 'plan', 'come', 'pos'])
 const POSITION_COMMANDS = new Set(['chest', 'exclude'])
 
 /**

@@ -24,4 +24,7 @@ function createConfig(env = process.env) {
 // 登録情報を保存するファイル（リポジトリの data/ は .gitignore で除外している）
 const STATE_FILE = path.join(__dirname, '..', 'data', 'state.json')
 
-module.exports = { createConfig, STATE_FILE }
+// 詳しい振り分けの計画を書き出すファイル
+const PLAN_FILE = path.join(__dirname, '..', 'data', 'plan.txt')
+
+module.exports = { createConfig, STATE_FILE, PLAN_FILE }

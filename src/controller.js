@@ -1,15 +1,17 @@
-// コマンドの実行（チェストの登録・除外、整理の開始と停止、呼び寄せと現在位置の報告）
-// この段階では、BOT はアイテムの操作をしない。移動するのは呼び寄せられたときだけ。
+// コマンドの実行（チェストの登録・除外、整理の開始と停止、調査と計画の表示、呼び寄せと現在位置の報告）
+// この段階では、BOT はアイテムを動かさない。移動するのは、調査するときと呼び寄せられたときだけ。
 
+const fs = require('node:fs')
+const path = require('node:path')
 const { Vec3 } = require('vec3')
-const { CHEST_NAME, chestPositions, findNearestChest, sortPositions } = require('./chests')
+const { CHEST_NAME, chestPositions, findNearestChest, sortPositions, formatPosition, formatChest, samePosition, overlaps } = require('./chests')
 const { HELP } = require('./commands')
+const { buildPlan } = require('./plan')
+const { formatSummary, formatDetail } = require('./planreport')
+const { surveyChests } = require('./survey')
 
-const formatPosition = ({ x, y, z }) => `${x} ${y} ${z}`
-const formatChest = (positions) => formatPosition(positions[0]) + (positions.length > 1 ? '（大きなチェスト）' : '')
-const samePosition = (a, b) => a.x === b.x && a.y === b.y && a.z === b.z
-// 1 つでも同じ座標があれば、同じチェストとみなす（登録後に大きなチェストへ広げられても一致する）
-const overlaps = (a, b) => a.some((p) => b.some((q) => samePosition(p, q)))
+// 調査中は受け付けないコマンド（移動や登録内容が、調査と食い違うため）
+const BLOCKED_WHILE_SURVEYING = new Set(['start', 'plan', 'chest', 'exclude', 'come'])
 
 class SortController {
   /**
@@ -19,13 +21,19 @@ class SortController {
    * @param {object} options
    * @param {import('./navigation').Navigator} options.navigator 移動を行うもの
    * @param {(message: string) => void} options.report 時間がかかるコマンドの経過の通知先
+   * @param {string} options.planFile 詳しい計画を書き出すファイル
+   * @param {typeof surveyChests} [options.survey] チェストを調査する関数
    */
-  constructor(bot, store, server, { navigator, report }) {
+  constructor(bot, store, server, { navigator, report, planFile, survey = surveyChests }) {
     this.bot = bot
     this.store = store
     this.server = server
     this.navigator = navigator
     this.report = report
+    this.planFile = planFile
+    this.survey = survey
+    // 実行中の調査。中止の合図と、終了を待つ Promise を持つ
+    this.task = null
   }
 
   // ワールドの識別子。ディメンションが違えば、同じ座標でも別の登録として扱う
@@ -41,7 +49,12 @@ class SortController {
    * @returns {string[]} すぐに返す文
    */
   execute(command, username) {
+    if (this.task && BLOCKED_WHILE_SURVEYING.has(command.type)) {
+      return [this.task.abort.signal.aborted ? '調査を中止しています。少し待ってください' : '調査中です。中止するには sort stop と発言してください']
+    }
     switch (command.type) {
+      case 'plan':
+        return this.plan()
       case 'come':
         return this.come(username)
       case 'pos':
@@ -132,12 +145,59 @@ class SortController {
   }
 
   stop() {
-    // 保存に失敗しても移動は止まるように、先に中止する
-    this.navigator.cancel()
+    // 保存に失敗しても調査と移動は止まるように、先に中止する
+    this.dispose()
     const world = this.store.get(this.worldKey)
     world.running = false
     this.store.set(this.worldKey, world)
     return ['整理と移動を停止しました']
+  }
+
+  // 調査と移動を中止する（停止の指示と、切断したときに使う）
+  dispose() {
+    this.task?.abort.abort()
+    this.navigator.cancel()
+  }
+
+  // 調査して計画を表示する。結果は、終わり次第 report で知らせる
+  plan() {
+    const world = this.store.get(this.worldKey)
+    if (!world.source) return ['指定チェストがありません。sort chest か sort start で登録してください']
+    this.navigator.cancel()
+    const task = { abort: new AbortController() }
+    this.task = task
+    task.done = this.runPlan(world, task.abort.signal).finally(() => {
+      this.task = null
+    })
+    return ['チェストの調査を始めます。アイテムは動かしません']
+  }
+
+  async runPlan(world, signal) {
+    try {
+      const { failed, ...survey } = await this.survey({
+        bot: this.bot,
+        navigator: this.navigator,
+        source: world.source.positions,
+        excluded: world.excluded,
+        signal
+      })
+      const plan = buildPlan(survey)
+      const summary = formatSummary(plan, failed)
+      try {
+        fs.mkdirSync(path.dirname(this.planFile), { recursive: true })
+        fs.writeFileSync(this.planFile, formatDetail(plan, failed))
+      } catch (err) {
+        console.error('計画を保存できませんでした:', err.message)
+        summary[summary.length - 1] = `アイテムは動かしていません。詳しい計画は保存できませんでした: ${err.message}`
+      }
+      console.log(formatDetail(plan, failed))
+      for (const line of summary) this.report(line)
+    } catch (err) {
+      // 中止した調査の結果は知らせない
+      if (signal.aborted) return
+      console.error('調査に失敗しました:', err)
+      this.report(`調査に失敗しました: ${err.message}`)
+    }
   }
 
   // 移動の経過と結果は、終わり次第 report で知らせる

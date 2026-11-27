@@ -1,7 +1,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Vec3 } = require('vec3')
-const { chestPositions, isInRange, findNearestChest } = require('./chests')
+const { chestPositions, isInRange, findChests, findNearestChest } = require('./chests')
 const { createFakeBot } = require('./fakebot')
 
 const block = (type, facing) => ({ position: new Vec3(0, 64, 0), getProperties: () => ({ type, facing }) })
@@ -38,6 +38,21 @@ test('範囲は水平 32、上下 8 ブロック', () => {
   assert.ok(!isInRange(center, { x: 0, y: 64, z: -33 }))
   assert.ok(!isInRange(center, { x: 0, y: 73, z: 0 }))
   assert.ok(!isInRange(center, { x: 0, y: 55, z: 0 }))
+})
+
+test('範囲内のチェストをすべて返し、大きなチェストは 1 つにまとめる', () => {
+  const bot = createFakeBot()
+  bot.putChest(3, 64, 0)
+  // 片方だけが範囲内の大きなチェスト
+  bot.putLargeChest(32, 64, 0)
+  bot.putChest(34, 64, 0)
+  assert.deepEqual(findChests(bot, { x: 0, y: 64, z: 0 }), [
+    [{ x: 3, y: 64, z: 0 }],
+    [
+      { x: 32, y: 64, z: 0 },
+      { x: 33, y: 64, z: 0 }
+    ]
+  ])
 })
 
 test('範囲内で一番近いチェストを返し、除外したものと範囲外は選ばない', () => {
