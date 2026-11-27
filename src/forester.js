@@ -119,10 +119,20 @@ async function holdAxe(bot) {
  * @returns {Promise<boolean>} 持てた場合は true。材料がないなどで用意できなければ false
  */
 async function ensureAxe(context, records) {
-  const { bot, signal, getTable, notify } = context
+  const { bot } = context
   if (await holdAxe(bot)) return true
+  // 一度用意できなかったら、同じ作業の間は作り直そうとしない（木を切るたびにクラフトを試して、手を止めないため）
+  if (context.axeUnavailable) return false
   await withdraw(context, records, isAxe, 1)
   if (await holdAxe(bot)) return true
+  const made = await makeAxe(context, records)
+  if (!made) context.axeUnavailable = true
+  return made
+}
+
+// 斧を作って手に持つ。材料か作業台がなければ false
+async function makeAxe(context, records) {
+  const { bot, signal, getTable, notify } = context
 
   await withdraw(context, records, isAxeStone, 3)
   const name = countHeld(bot, isAxeStone) >= 3 ? 'stone_axe' : 'wooden_axe'
@@ -271,6 +281,8 @@ async function replant(context, pending, records) {
  */
 async function climbTree(context, tree, records, spot) {
   const { bot, navigator, signal } = context
+  // 斧は、登る前に地上で用意する
+  if (!(await ensureAxe(context, records))) context.barehanded = true
   const moved = await navigator.moveTo(new goals.GoalBlock(spot.x, spot.y, spot.z), createForestryMovements)
   signal.throwIfAborted()
   if (moved.status !== 'arrived') return { cut: 0, reason: `${formatPosition(spot)} へ行けません` }
@@ -278,9 +290,9 @@ async function climbTree(context, tree, records, spot) {
   const own = `${tree.type}_log`
   const cut = await cutFromTrunk(bot, tree, {
     dig: async (block) => {
-      // 中止されたあとも、積んだ柱は掘って降りるため、斧を用意できなくても掘る
-      const axe = await ensureAxe(context, records).catch(() => false)
-      if (!axe) context.barehanded = true
+      // 柱の上にいる間は、斧を作りに作業台へ行かない（持っている斧だけを使う）。
+      // 中止されたあとも、積んだ柱は掘って降りるため、斧がなくても掘る
+      if (!(await holdAxe(bot).catch(() => false))) context.barehanded = true
       await bot.dig(block, true)
     },
     holdBlock: async () => {
