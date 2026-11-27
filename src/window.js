@@ -157,7 +157,7 @@ async function withChest({ bot, navigator, signal, failed }, chest, operate) {
   try {
     window = await bot.openContainer(record.block)
   } catch (err) {
-    console.error(`チェスト (${formatPosition(record.block.position)}) を開けませんでした:`, err.message)
+    console.error(`チェスト ${formatPosition(record.block.position)} を開けませんでした:`, err.message)
     signal.throwIfAborted()
     chest.unavailable = true
     failed.push({ positions: chest.positions, reason: '開けません' })

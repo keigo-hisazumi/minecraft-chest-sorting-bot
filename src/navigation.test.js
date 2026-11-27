@@ -27,7 +27,7 @@ const arrive = async (bot) => {
 test('プレイヤーのそばに着いたら到着を知らせる', async () => {
   const { navigator, messages, report } = setup(arrive)
   await navigator.come('Tester', report)
-  assert.deepEqual(messages, ['Tester のそばへ向かいます', '到着しました'])
+  assert.deepEqual(messages, ['移動します: Tester のそば', '移動しました: Tester のそば'])
 })
 
 test('姿が見えないプレイヤーへは移動しない', async () => {
@@ -41,14 +41,14 @@ test('移動に失敗した場合は理由を知らせて止まる', async () =>
     throw new Error('No path to the goal!')
   })
   await navigator.come('Tester', report)
-  assert.equal(messages.at(-1), 'そばまで行けませんでした: No path to the goal!')
+  assert.equal(messages.at(-1), '移動できませんでした: Tester のそば（No path to the goal!）')
   assert.equal(bot.goals.at(-1), null)
 })
 
 test('goto が終わっても着いていなければ、到着としない', async () => {
   const { navigator, messages, report } = setup(async () => {})
   await navigator.come('Tester', report)
-  assert.equal(messages.at(-1), 'そばまで行けませんでした')
+  assert.equal(messages.at(-1), '移動できませんでした: Tester のそば')
 })
 
 test('中止した移動の結果は知らせない', async () => {
@@ -63,7 +63,7 @@ test('中止した移動の結果は知らせない', async () => {
   navigator.cancel()
   finish(new Error('GoalChanged'))
   await moving
-  assert.deepEqual(messages, ['Tester のそばへ向かいます'])
+  assert.deepEqual(messages, ['移動します: Tester のそば'])
 })
 
 // 経路はあるのに動けなくなる BOT。goto は stop されるまで待ち続け、stop されると失敗する

@@ -170,5 +170,5 @@ test('要約は短くまとめ、詳細にはすべて書く', () => {
   assert.ok(summary.every((line) => line.length <= 256))
   assert.match(summary[3], /廃棄予定: a 384 個、b 384 個、c 384 個 ほか 2 件/)
   assert.match(formatDetail(plan, failed), /e: 384 個/)
-  assert.match(formatDetail(plan, failed), /4 1 2: 開けません/)
+  assert.match(formatDetail(plan, failed), /\(4, 1, 2\): 開けません/)
 })

@@ -1,6 +1,7 @@
 // チェストの判定と検索
 
 const { Vec3 } = require('vec3')
+const { formatPosition } = require('./messages')
 
 // 対象は通常のチェストだけ（樽、トラップチェスト、銅のチェストなどは含めない）
 const CHEST_NAME = 'chest'
@@ -37,7 +38,6 @@ function sortPositions(positions) {
   return [...positions].sort((a, b) => a.x - b.x || a.y - b.y || a.z - b.z)
 }
 
-const formatPosition = ({ x, y, z }) => `${x} ${y} ${z}`
 const formatChest = (positions) => formatPosition(positions[0]) + (positions.length > 1 ? '（大きなチェスト）' : '')
 const samePosition = (a, b) => a.x === b.x && a.y === b.y && a.z === b.z
 // 1 つでも同じ座標があれば、同じチェストとみなす（登録後に大きなチェストへ広げられても一致する）

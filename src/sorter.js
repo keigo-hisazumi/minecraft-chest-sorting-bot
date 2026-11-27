@@ -4,7 +4,8 @@
 
 const { goals } = require('mineflayer-pathfinder')
 const { buildChests } = require('./builder')
-const { formatPosition, overlaps } = require('./chests')
+const { formatChest, formatPosition, overlaps } = require('./chests')
+const { message } = require('./messages')
 const { discardOverflow } = require('./discard')
 const { createLayout, destinationFor, movableStacks } = require('./moves')
 const { buildPlan } = require('./plan')
@@ -98,6 +99,10 @@ async function carry(context, chests) {
     }
     const result = await visit(context, chest, { pickup })
     if (!result) continue
+    // チェストを 1 つ整理するごとに知らせる
+    if (chest !== source && result.delivered > 0) {
+      context.notify(message.done('整理', `${formatChest(chest.positions)} へ ${result.delivered} 個`))
+    }
     delivered += result.delivered
     stalls = result.delivered + result.taken > 0 ? 0 : stalls + 1
   }
@@ -134,6 +139,7 @@ async function sortOnce({
   discardLog,
   discard = discardOverflow
 }) {
+  notify(message.start('調査', 'チェストの中身', 'アイテムを移す前に確かめます'))
   const inspect = () => surveyChests({ bot, navigator, source: world.source.positions, excluded: world.excluded, signal })
   let survey = await inspect()
   const built = await build({ bot, navigator, survey, world, signal, saveReplant, notify })
@@ -160,6 +166,7 @@ async function sortOnce({
   const waiting = Object.fromEntries(plan.dedicated.map((d) => [d.name, null]))
   const layout = createLayout({ ...assignments, dedicated: { ...waiting, ...assignments.dedicated } }, chests)
   const context = { bot, navigator, signal, layout, source, failed, notify }
+  notify(message.done('調査', `チェスト ${survey.chests.length + 1} 個`, `アイテム ${plan.itemKinds} 種類`))
   let delivered = await carry(context, chests)
   const discarded = await discard(context, { chests, center: source.positions[0], logFile: discardLog })
   // 廃棄のために取り出した分や、入れ替えた分を片付ける
@@ -211,7 +218,7 @@ function mergeAssignments(previous, plan, survey) {
  */
 async function readSourceSignature({ bot, navigator, world, signal }) {
   const record = await readChest({ bot, navigator, signal }, world.source.positions)
-  if (!record.items) throw new Error(`指定チェスト (${formatPosition(world.source.positions[0])}) を調査できません: ${record.reason}`)
+  if (!record.items) throw new Error(`指定チェスト ${formatPosition(world.source.positions[0])} を調査できません: ${record.reason}`)
   return signatureOf(record.positions, record.items)
 }
 

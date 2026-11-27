@@ -42,7 +42,7 @@ async function readChest({ bot, navigator, signal }, positions) {
   try {
     window = await bot.openContainer(block)
   } catch (err) {
-    console.error(`チェスト (${formatPosition(block.position)}) を開けませんでした:`, err.message)
+    console.error(`チェスト ${formatPosition(block.position)} を開けませんでした:`, err.message)
     signal.throwIfAborted()
     return { positions: current, reason: '開けません' }
   }
@@ -77,7 +77,7 @@ async function surveyChests({ bot, navigator, source, excluded, signal }) {
 
   const sourceRecord = await readChest(context, source)
   // 指定チェストの中身がないと、正しい計画にならない
-  if (!sourceRecord.items) throw new Error(`指定チェスト (${formatPosition(center)}) を調査できません: ${sourceRecord.reason}`)
+  if (!sourceRecord.items) throw new Error(`指定チェスト ${formatPosition(center)} を調査できません: ${sourceRecord.reason}`)
 
   const remaining = findChests(bot, center).filter(
     (positions) => !overlaps(positions, sourceRecord.positions) && !excluded.some((chest) => overlaps(chest, positions))

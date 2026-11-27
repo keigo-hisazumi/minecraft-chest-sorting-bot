@@ -6,6 +6,7 @@ const { pathfinder } = require('mineflayer-pathfinder')
 const { createConfig, STATE_FILE, PLAN_FILE, DISCARD_LOG } = require('./config')
 const { parseCommand } = require('./commands')
 const { SortController } = require('./controller')
+const { createChat, message } = require('./messages')
 const { Navigator } = require('./navigation')
 const { StateStore } = require('./state')
 
@@ -20,15 +21,17 @@ function connect() {
   // mineflayer 自体のエラー出力は止めて、下の error の処理でまとめて表示する
   const bot = mineflayer.createBot({ ...config, hideErrors: true })
   bot.loadPlugin(pathfinder)
+  // 周囲のチャンクが読み込まれるまでは、チェストを確認できない
+  let ready = false
+  // 発言は間を空けて順に出す。切断したあとは発言できないため、記録だけにする
+  const chat = createChat(bot, { canChat: () => ready })
+  const report = chat.say
   const controller = new SortController(bot, store, `${config.host}:${config.port}`, {
     navigator: new Navigator(bot),
-    // 切断したあとは発言できないため、記録だけにする
-    report: (message) => (ready ? bot.chat(message) : console.log(message)),
+    report,
     planFile: PLAN_FILE,
     discardLog: DISCARD_LOG
   })
-  // 周囲のチャンクが読み込まれるまでは、チェストを確認できない
-  let ready = false
 
   bot.once('spawn', async () => {
     try {
@@ -37,7 +40,7 @@ function connect() {
       console.error('チャンクの読み込みを待てませんでした:', err.message)
     }
     ready = true
-    bot.chat('SortBot 起動')
+    report(message.done('起動', 'SortBot', '使い方は sort help と発言してください'))
     console.log(`接続しました: ${config.host}:${config.port}（${bot.version}）`)
     try {
       controller.resume()
@@ -55,19 +58,19 @@ function connect() {
   })
 
   // 命令は、BOT 自身を除くすべてのプレイヤーから受け付ける
-  bot.on('chat', (username, message) => {
+  bot.on('chat', (username, text) => {
     if (username === bot.username) return
-    const command = parseCommand(message)
+    const command = parseCommand(text)
     if (!command) return
     if (!ready) {
       bot.chat('準備中です。少し待ってから、もう一度発言してください')
       return
     }
     try {
-      for (const line of controller.execute(command, username)) bot.chat(line)
+      for (const line of controller.execute(command, username)) report(line)
     } catch (err) {
       console.error('コマンドの実行に失敗しました:', err)
-      bot.chat(`コマンドを実行できませんでした: ${err.message}`)
+      report(message.failed('コマンドの実行', null, err.message))
     }
   })
 
@@ -76,6 +79,7 @@ function connect() {
   bot.on('error', (err) => console.error('エラー:', err.message || err.code || err))
   bot.once('end', (reason) => {
     ready = false
+    chat.clear()
     controller.dispose()
     console.log(`切断されました: ${reason}。${RECONNECT_DELAY_MS / 1000} 秒後に再接続します`)
     setTimeout(connect, RECONNECT_DELAY_MS)

@@ -4,6 +4,7 @@
 
 const { goals } = require('mineflayer-pathfinder')
 const { CHEST_NAME, chestPositions, isInRange, overlaps, formatPosition } = require('./chests')
+const { message } = require('./messages')
 const { countPlanks, plankValue, isPlank, planksPerLog, craftPlanks, craftTable, craftChests } = require('./crafting')
 const { gatherWood, findTrees } = require('./forester')
 const { buildPlan } = require('./plan')
@@ -85,7 +86,7 @@ async function placeAt({ bot, navigator, signal }, { cell, front, facing }, name
   try {
     await bot._placeBlockWithOptions(floor, cell.minus(floor.position), { forceLook: 'ignore', swingArm: 'right' })
   } catch (err) {
-    console.error(`(${formatPosition(cell)}) に置けませんでした:`, err.message)
+    console.error(`${formatPosition(cell)} に置けませんでした:`, err.message)
     signal.throwIfAborted()
   }
   await bot.waitForTicks(SETTLE_TICKS)
@@ -195,10 +196,10 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
     if (table || !create) return table ?? (hasTableItem() || null)
     if (!hasTableItem()) {
       if (countPlanks(stock()) < PLANKS_PER_TABLE) {
-        notify('クラフトします: 板材')
+        notify(message.start('クラフト', '板材'))
         await craftPlanks(bot, PLANKS_PER_TABLE, signal)
       }
-      notify('クラフトします: 作業台')
+      notify(message.start('クラフト', '作業台'))
       await craftTable(bot)
     }
     table = await placeTable(context)
@@ -208,9 +209,9 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
 
   const { expansions, blocked, newChests, skippedNew } = planBuild(bot, survey, world, center)
   if (blocked.length > 0) {
-    result.problems.push(`隣に置けず広げられない単体チェスト: ${blocked.length} 個（${formatPosition(blocked[0].positions[0])} など）`)
+    result.problems.push(message.failed('拡張', `単体チェスト ${blocked.length} 個`, `隣に置けません。${formatPosition(blocked[0].positions[0])} など`))
   }
-  if (skippedNew) result.problems.push('調べられないチェストがあるため、新しいチェストは作りません')
+  if (skippedNew) result.problems.push(message.failed('設置', '新しいチェスト', '調べられないチェストがあります'))
   const wantedItems = Math.min(CHEST_LIMIT, expansions.length + 2 * newChests)
   if (wantedItems === 0) return result
 
@@ -235,14 +236,15 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
         result.pendingReplant = next.length
         saveReplant(next)
       }
+      notify(message.start('伐採', 'チェストの材料', `板材 ${planksFor(wantedItems) - heldValue()} 枚分`))
       const gathered = await gatherWood(context, { wanted: planksFor(wantedItems), records, pending: world.replant ?? [], savePending })
       result.trees = gathered.trees
       result.logs = gathered.logs
       if (gathered.trees > 0) result.changed = true
       if (gathered.barehanded) result.notes.push('斧を用意できない間は、素手で伐採しました')
       if (gathered.exhausted) {
-        const tall = gathered.tall > 0 ? `（手が届かない大きな木 ${gathered.tall} 本は切りません）` : ''
-        result.problems.push(`範囲内に伐採できる木がありません${tall}`)
+        const tall = gathered.tall > 0 ? `大きすぎる木 ${gathered.tall} 本は切りません` : null
+        result.problems.push(message.failed('伐採', '範囲内に切れる木がありません', tall))
       }
     }
   }
@@ -250,7 +252,7 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
   let items = wantedItems
   while (items > 0 && planksFor(items) > heldValue()) items--
   if (items < wantedItems) {
-    result.problems.push(`板材が ${planksFor(wantedItems) - heldValue()} 枚足りないため、一部のチェストを作れません`)
+    result.problems.push(message.failed('クラフト', '一部のチェスト', `板材が ${planksFor(wantedItems) - heldValue()} 枚足りません`))
   }
   const { expand: expandCount, create: createCount } = affordable(items, expansions, newChests)
   const chestItems = expandCount + 2 * createCount
@@ -261,17 +263,17 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
   if (toCraft > 0) {
     const planks = toCraft * PLANKS_PER_CHEST + (hasTable() ? 0 : PLANKS_PER_TABLE)
     if (countPlanks(stock()) < planks) {
-      notify('クラフトします: 板材')
+      notify(message.start('クラフト', '板材'))
       await craftPlanks(bot, planks, signal)
     }
     if (!(await context.getTable({ create: true }))) {
-      result.problems.push('作業台を置く場所がないか、ホットバーに空きがありません')
+      result.problems.push(message.failed('設置', '作業台', '置く場所がないか、ホットバーに空きがありません'))
       return result
     }
     const reached = await navigator.moveTo(new goals.GoalLookAtBlock(table.position, bot.world, { reach: REACH }))
     signal.throwIfAborted()
     if (reached.status !== 'arrived') throw new Error('作業台に近づけません')
-    notify(`クラフトします: チェスト ${toCraft} 個`)
+    notify(message.start('クラフト', `チェスト ${toCraft} 個`))
     await craftChests(bot, table, toCraft, signal)
   }
 
@@ -291,7 +293,7 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
     await release(bot, (item) => item.name === CHEST_NAME).catch((err) => console.error('残ったチェストを戻せませんでした:', err.message))
   }
   if (result.expanded < expandCount || result.created < createCount) {
-    result.problems.push('チェストを置けませんでした。置く場所と、ホットバーの空きを確認してください')
+    result.problems.push(message.failed('設置', 'チェスト', '置く場所と、ホットバーの空きを確認してください'))
   }
   return result
 }
