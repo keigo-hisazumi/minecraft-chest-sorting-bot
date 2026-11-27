@@ -1,0 +1,27 @@
+{
+  "name": "minecraft-chest-sorting-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "指定したチェストのアイテムを周囲のチェストへ振り分ける Minecraft BOT",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "build": "node scripts/check-syntax.js",
+    "test": "node --test \"src/**/*.test.js\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/keigo-hisazumi/minecraft-chest-sorting-bot.git"
+  },
+  "author": "keigo-hisazumi",
+  "license": "MIT",
+  "dependencies": {
+    "mineflayer": "^4.39.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.2.0"
+  }
+}
