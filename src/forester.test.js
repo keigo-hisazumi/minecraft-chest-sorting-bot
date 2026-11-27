@@ -4,19 +4,21 @@ const { Vec3 } = require('vec3')
 const { gatherWood } = require('./forester')
 
 // 斧を持った BOT と、自然のオークが 1 本だけある世界。掘ったブロックは空気になる
-function setup() {
+// bottom を上げると、根元を切ったあとに宙に残った上部（切り残し）になる
+function setup({ bottom = 64 } = {}) {
   const blocks = new Map()
   const put = (x, y, z, name) => blocks.set(new Vec3(x, y, z).toString(), name)
-  for (let y = 64; y < 68; y++) put(0, y, 0, 'oak_log')
+  const top = bottom + 3
+  for (let y = bottom; y <= top; y++) put(0, y, 0, 'oak_log')
   for (const [x, z] of [
     [1, 0],
     [-1, 0],
     [0, 1],
     [0, -1]
   ]) {
-    put(x, 67, z, 'oak_leaves')
+    put(x, top, z, 'oak_leaves')
   }
-  const logs = [64, 65, 66, 67].map((y) => new Vec3(0, y, 0))
+  const logs = [0, 1, 2, 3].map((dy) => new Vec3(0, bottom + dy, 0))
   const events = []
   const slots = []
   slots[36] = { name: 'wooden_axe', count: 1, stackSize: 1 }
@@ -73,4 +75,24 @@ test('伐採する前に通知し、原木だけを切って、植え直さず�
   assert.equal(result.trees, 1)
   assert.equal(result.logs, 4)
   assert.ok(result.exhausted)
+})
+
+test('根元を切ったあとに宙に残った上部も切り、木の本数には数えない', async () => {
+  const { context, events } = setup({ bottom: 70 })
+  let saved = null
+  const result = await gatherWood(context, {
+    wanted: 16,
+    records: [],
+    pending: [],
+    savePending: (spots) => {
+      saved = spots
+    }
+  })
+  assert.equal(events[0], '伐採します: オークの切り残し (0, 70, 0)（原木 4 個）')
+  assert.ok(events.includes('dig oak_log 73'))
+  assert.equal(result.remnants, 1)
+  assert.equal(result.trees, 0)
+  assert.equal(result.logs, 4)
+  // 植え直す場所は増やさない
+  assert.deepEqual(saved, [])
 })

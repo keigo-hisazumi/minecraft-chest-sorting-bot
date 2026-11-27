@@ -121,4 +121,41 @@ function analyzeTree(blockAt, start) {
   return reachable ? { ...tree, ok: true } : rejected('tall')
 }
 
-module.exports = { TREE_LABELS, TREE_TYPES, LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves }
+/**
+ * 原木のつながりが、根元を切ったあとに残った自然の木の上部（切り残し）かを判定する
+ * 一番下の原木がどれも宙に浮いていて（下が空気か自然の葉）、隣に人が置いたと考えられるブロックがなく、
+ * 自然の葉に囲まれていれば、切り残しとみなす。
+ *
+ * @param {(position: Vec3) => object | null} blockAt
+ * @param {Vec3} start 原木の座標
+ * @returns {{ ok: boolean, remnant: true, type: string, logs: Vec3[], base: Vec3[] }}
+ *   logs は低い順。base は一番下の原木
+ */
+function analyzeRemnant(blockAt, start) {
+  const name = blockAt(start).name
+  const type = name.slice(0, -'_log'.length)
+  const logs = connectedLogs(blockAt, start, name).sort((a, b) => a.y - b.y || a.x - b.x || a.z - b.z)
+  const base = logs.filter((p) => p.y === logs[0].y)
+  const tree = { ok: false, remnant: true, type, logs, base }
+  if (logs.length > MAX_LOGS) return tree
+  const open = (block) => !block || block.name === 'air' || block.name === 'cave_air' || isNaturalLeaves(block)
+  // 一番下の原木は、どれも宙に浮いている（地面に立つ木や、建物の柱ではない）
+  if (!base.every((p) => open(blockAt(p.offset(0, -1, 0))))) return tree
+  const natural = (block) => Boolean(block) && (block.name === name || isNaturalLeaves(block) || NATURAL.test(block.name))
+  if (!logs.every((p) => FACES.every((face) => natural(blockAt(p.plus(face)))))) return tree
+  const leaves = new Set()
+  for (const position of logs) {
+    for (const offset of AROUND) {
+      const next = position.plus(offset)
+      const block = blockAt(next)
+      if (block?.name === `${type}_leaves` && isNaturalLeaves(block)) leaves.add(next.toString())
+    }
+  }
+  if (leaves.size < MIN_LEAVES) return tree
+  const compact = logs.every(
+    (p) => p.y - base[0].y <= MAX_HEIGHT && Math.abs(p.x - base[0].x) <= MAX_SPREAD && Math.abs(p.z - base[0].z) <= MAX_SPREAD
+  )
+  return { ...tree, ok: compact }
+}
+
+module.exports = { MAX_HEIGHT, TREE_LABELS, TREE_TYPES, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves, isPlacedLeaves }
