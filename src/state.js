@@ -36,11 +36,14 @@ const isAssignments = (a) =>
   Object.values(a.dedicated).every((positions) => positions === null || isPositions(positions)) &&
   isPositionsList(a.mixed) &&
   isPositionsList(a.protected)
+// 苗木を植え直す場所。伐採を始める前の版で保存した内容にはない
+const isReplant = (list) => list === undefined || (Array.isArray(list) && list.every((s) => isPosition(s) && typeof s.name === 'string'))
 const isWorld = (w) =>
   (w?.source === null || (isPositions(w?.source?.positions) && typeof w.source.auto === 'boolean')) &&
   isPositionsList(w.excluded) &&
   typeof w.running === 'boolean' &&
-  isAssignments(w.assignments)
+  isAssignments(w.assignments) &&
+  isReplant(w.replant)
 
 // 版 1 の開始の状態は、アイテムを動かさなかったときの指示のため、引き継がずに停止にする
 const upgradeFromVersion1 = (world) => ({ ...world, running: false, assignments: emptyAssignments() })

@@ -110,6 +110,37 @@ async function readyToOpen({ bot, navigator, signal }, chest) {
   return { reason: '到達できません' }
 }
 
+const hotbarSlots = (inventory) => Array.from({ length: 9 }, (v, i) => inventory.inventoryStart + CARGO_SLOTS + i)
+
+/**
+ * アイテムを手に持つ。ホットバーになければ、荷物から空き枠へ移す
+ *
+ * @returns {Promise<boolean>} 持てた場合は true。持っていないか、ホットバーに空きがなければ false
+ */
+async function hold(bot, name) {
+  const { inventory } = bot
+  const slots = hotbarSlots(inventory)
+  let target = slots.find((slot) => inventory.slots[slot]?.name === name)
+  if (target === undefined) {
+    const item = cargoStacks(inventory).find((s) => s.name === name)
+    target = slots.find((slot) => !inventory.slots[slot])
+    if (!item || target === undefined) return false
+    await moveStack(bot, inventory, item.slot, target)
+  }
+  bot.setQuickBarSlot(target - slots[0])
+  return true
+}
+
+// ホットバーに残ったアイテムを、荷物へ戻して整理の対象にする。荷物に空きがなければ残す
+async function release(bot, matches) {
+  const { inventory } = bot
+  for (const slot of hotbarSlots(inventory)) {
+    const item = inventory.slots[slot]
+    const empty = emptyCargoSlots(inventory)[0]
+    if (item && matches(item, slot) && empty !== undefined) await moveStack(bot, inventory, slot, empty)
+  }
+}
+
 /**
  * チェストのそばへ行って開き、操作して閉じる
  *
@@ -156,5 +187,8 @@ module.exports = {
   synchronize,
   clearCursor,
   moveStack,
+  hotbarSlots,
+  hold,
+  release,
   withChest
 }

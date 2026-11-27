@@ -43,15 +43,16 @@ class Navigator {
    * 目標の場所へ移動する
    *
    * @param {import('mineflayer-pathfinder').goals.Goal} goal 目標
+   * @param {(bot: import('mineflayer').Bot) => object} [movementsFactory] この移動だけで使う移動のルール
    * @returns {Promise<{ status: 'arrived' | 'failed' | 'cancelled', reason?: string }>} 移動の結果。
    *   cancelled は、中止されたか、別の移動に切り替わったことを表す
    */
-  async moveTo(goal) {
+  async moveTo(goal, movementsFactory = this.movementsFactory) {
     const generation = ++this.generation
     let timer
     let failure = null
     try {
-      this.bot.pathfinder.setMovements(this.movementsFactory(this.bot))
+      this.bot.pathfinder.setMovements(movementsFactory(this.bot))
       await Promise.race([
         this.bot.pathfinder.goto(goal),
         new Promise((resolve, reject) => {
