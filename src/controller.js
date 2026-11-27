@@ -37,6 +37,7 @@ class SortController {
    * @param {{ sortOnce: typeof sortOnce, readSourceSignature: typeof readSourceSignature }} [options.sorter] 整理を行うもの
    * @param {number} [options.pollInterval] 指定チェストを確認する間隔（ミリ秒）
    * @param {typeof replant} [options.replanter] 苗木を植え直す関数
+   * @param {string} [options.discardLog] 廃棄を記録するファイル。なければ廃棄しない
    */
   constructor(
     bot,
@@ -49,10 +50,12 @@ class SortController {
       survey = surveyChests,
       sorter = { sortOnce, readSourceSignature },
       pollInterval = POLL_INTERVAL_MS,
-      replanter = replant
+      replanter = replant,
+      discardLog
     }
   ) {
     this.replanter = replanter
+    this.discardLog = discardLog
     this.bot = bot
     this.store = store
     this.server = server
@@ -174,7 +177,10 @@ class SortController {
     world.running = true
     this.store.set(this.worldKey, world)
     this.startSorting()
-    return ['整理を開始します。やめるときは sort stop と発言してください']
+    return [
+      '整理を開始します。やめるときは sort stop と発言してください',
+      '専用チェストに入りきらないアイテムは、範囲内にサボテンがあれば投げて廃棄します。元に戻せません'
+    ]
   }
 
   // 再接続や再起動のあと、開始の状態なら整理を再開する
@@ -225,15 +231,17 @@ class SortController {
             ...context,
             saveAssignments: (assignments) => this.store.set(key, { ...this.store.get(key), assignments }),
             saveReplant: (spots) => this.saveReplant(key, spots),
-            notify: this.report
+            notify: this.report,
+            discardLog: this.discardLog
           })
           const { problems = [], expanded = 0, created = 0, trees = 0 } = result.build ?? {}
-          const unfinished = result.failed.length > 0 || problems.length > 0
+          const unfinished = result.failed.length > 0 || problems.length > 0 || Boolean(result.discard?.problem)
           signature = { value: result.signature, retry: unfinished }
           polls = 0
           const lines = formatResult(result)
           // 何も移さず作業もせず、前回と同じ内容なら、繰り返して知らせない
-          const worked = result.delivered + expanded + created + trees > 0
+          const discarded = Object.keys(result.discard?.discarded ?? {}).length
+          const worked = result.delivered + expanded + created + trees + discarded > 0
           if (worked || lines.join('\n') !== reported) tell(lines)
           reported = lines.join('\n')
         }

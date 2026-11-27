@@ -27,4 +27,7 @@ const STATE_FILE = path.join(__dirname, '..', 'data', 'state.json')
 // 詳しい振り分けの計画を書き出すファイル
 const PLAN_FILE = path.join(__dirname, '..', 'data', 'plan.txt')
 
-module.exports = { createConfig, STATE_FILE, PLAN_FILE }
+// 廃棄したアイテムを記録するファイル
+const DISCARD_LOG = path.join(__dirname, '..', 'data', 'discard.log')
+
+module.exports = { createConfig, STATE_FILE, PLAN_FILE, DISCARD_LOG }

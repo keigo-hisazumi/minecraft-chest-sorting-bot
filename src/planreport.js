@@ -100,6 +100,11 @@ function formatResult(result) {
   ]
   if (done.length > 0) lines.push(done.join('。'))
   lines.push(...problems)
+  const { discarded = {}, remaining = 0, problem = null } = result.discard ?? {}
+  const thrown = Object.entries(discarded).map(([name, count]) => `${name} ${count} 個`)
+  if (thrown.length > 0) lines.push(`廃棄しました: ${shorten(thrown)}`)
+  if (problem) lines.push(problem)
+  if (remaining > 0) lines.push(`廃棄する予定の ${remaining} 個が残っています`)
   if (result.shortage.length > 0) lines.push(`専用にする大きなチェストが足りないため残しています: ${shorten(result.shortage)}`)
   if (result.missingChests > 0) lines.push(`混合または保護対象のチェストが ${result.missingChests} 個足りません`)
   if (result.sourceItems > 0) lines.push(`指定チェストに ${result.sourceItems} 個残っています`)

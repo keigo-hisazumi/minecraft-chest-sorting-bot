@@ -3,7 +3,7 @@
 
 const mineflayer = require('mineflayer')
 const { pathfinder } = require('mineflayer-pathfinder')
-const { createConfig, STATE_FILE, PLAN_FILE } = require('./config')
+const { createConfig, STATE_FILE, PLAN_FILE, DISCARD_LOG } = require('./config')
 const { parseCommand } = require('./commands')
 const { SortController } = require('./controller')
 const { Navigator } = require('./navigation')
@@ -24,7 +24,8 @@ function connect() {
     navigator: new Navigator(bot),
     // 切断したあとは発言できないため、記録だけにする
     report: (message) => (ready ? bot.chat(message) : console.log(message)),
-    planFile: PLAN_FILE
+    planFile: PLAN_FILE,
+    discardLog: DISCARD_LOG
   })
   // 周囲のチャンクが読み込まれるまでは、チェストを確認できない
   let ready = false
