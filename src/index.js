@@ -7,8 +7,10 @@ const { createConfig, STATE_FILE, PLAN_FILE, DISCARD_LOG } = require('./config')
 const { parseCommand } = require('./commands')
 const { SortController } = require('./controller')
 const { createChat, message } = require('./messages')
+const { ESCAPE_BLOCK_NAMES } = require('./escape')
 const { Navigator } = require('./navigation')
 const { StateStore } = require('./state')
+const { hold } = require('./window')
 
 // 切断されてから再接続するまでの時間（ミリ秒）
 const RECONNECT_DELAY_MS = 5000
@@ -27,7 +29,18 @@ function connect() {
   const chat = createChat(bot, { canChat: () => ready })
   const report = chat.say
   const controller = new SortController(bot, store, `${config.host}:${config.port}`, {
-    navigator: new Navigator(bot),
+    navigator: new Navigator(bot, {
+      // 穴に落ちて動けなくなったときは、土や丸石、原木を積んで登る
+      escape: {
+        holdBlock: async () => {
+          for (const name of ESCAPE_BLOCK_NAMES) {
+            if (await hold(bot, name)) return true
+          }
+          return false
+        },
+        notify: (text) => report(text)
+      }
+    }),
     report,
     planFile: PLAN_FILE,
     discardLog: DISCARD_LOG

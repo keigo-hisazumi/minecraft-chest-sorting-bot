@@ -3,11 +3,11 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Vec3 } = require('vec3')
-const { cutFromTrunk, findPillarSpot } = require('./climb')
+const { cutFromTrunk, findPillarSpot, towerUp } = require('./climb')
 
 // 高さ 63 が地面で、(0, 64, 0) から高さ height のオークの幹がある世界と、ジャンプと着地だけを真似る BOT の偽物
 // 根元の 2 つの原木は、地上から切ったものとして、はじめから空いている
-function createTallTree({ height = 12, blocks: holdable = 64, x = 0.5 } = {}) {
+function createTallTree({ height = 12, blocks: holdable = 64, x = 0.5, plant = null } = {}) {
   const blocks = new Map()
   const key = (p) => `${p.x},${p.y},${p.z}`
   const put = (p, name) => blocks.set(key(p), name)
@@ -15,6 +15,8 @@ function createTallTree({ height = 12, blocks: holdable = 64, x = 0.5 } = {}) {
   for (let y = 64; y < 64 + height; y++) logs.push(new Vec3(0, y, 0))
   for (const p of logs.slice(2)) put(p, 'oak_log')
   put(new Vec3(0, 64 + height, 0), 'oak_leaves')
+  // 根元の跡に生えた草花
+  if (plant) put(new Vec3(0, 64, 0), plant)
   const blockAt = (p) => {
     const name = blocks.get(key(p)) ?? (p.y <= 63 ? 'grass_block' : 'air')
     return { name, position: p, diggable: true, getProperties: () => ({ persistent: false }) }
@@ -57,7 +59,9 @@ function createTallTree({ height = 12, blocks: holdable = 64, x = 0.5 } = {}) {
       bot.placedCount++
       bot.held--
     },
+    dug: [],
     async dig(block) {
+      bot.dug.push(block.name)
       blocks.delete(key(block.position))
       bot.entity.onGround = false
     }
@@ -117,6 +121,14 @@ test('cutFromTrunk: 原木を残して登るのをやめたら、理由を知ら
   await cutFromTrunk(bot, tree, { ...ops, onStop: (reason) => reasons.push(reason) })
   assert.equal(reasons.length, 1)
   assert.match(reasons[0], /^足場にするブロックを持っていません$/)
+})
+
+test('towerUp: 足元に花があれば、刈ってから足場を置く（花は、ブロックを置いても置き換わらないため）', async () => {
+  const { bot, blockAt } = createTallTree({ plant: 'poppy' })
+  const placed = await towerUp(bot)
+  assert.deepEqual(bot.dug, ['poppy'])
+  assert.deepEqual(placed, new Vec3(0, 64, 0))
+  assert.equal(blockAt(new Vec3(0, 64, 0)).name, 'oak_log')
 })
 
 test('findPillarSpot: 原木の真下で、空気と葉を抜けた先の地面の上を返す', () => {
