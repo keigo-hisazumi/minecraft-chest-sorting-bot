@@ -57,6 +57,14 @@ function setup(t) {
     replants.push({ pending, records })
     return { planted: pending.length, pending: [] }
   }
+  // 伐採は呼び出しを記録し、指定した本数を切ったことにする
+  const fells = []
+  const feller = async (context, count, { pending, savePending }) => {
+    fells.push({ context, count })
+    const cut = [{ x: 3, y: 64, z: 0, name: 'oak_sapling' }]
+    savePending([...pending, ...cut])
+    return { trees: count, logs: count * 4, tall: 0, exhausted: false, barehanded: false, pending: [...pending, ...cut] }
+  }
   const boot = () => {
     const created = new SortController(bot, new StateStore(file), 'localhost:25565', {
       navigator,
@@ -65,6 +73,7 @@ function setup(t) {
       survey,
       sorter,
       replanter,
+      feller,
       pollInterval: 5
     })
     controllers.push(created)
@@ -80,7 +89,7 @@ function setup(t) {
     run('sort stop')
     await done
   }
-  return { bot, boot, controller, moves, run, state, stop, surveys, reports, planFile, sorting, replants }
+  return { bot, boot, controller, moves, run, state, stop, surveys, reports, planFile, sorting, replants, fells }
 }
 
 async function until(check) {
@@ -385,4 +394,29 @@ test('登録はディメンションごとに分ける', (t) => {
   run('sort chest 2 64 0')
   bot.game.dimension = 'the_nether'
   assert.equal(state().source, null)
+})
+
+test('指示した本数だけ伐採し、切った場所を植え直し用に記録する', async (t) => {
+  const { run, controller, state, reports, fells } = setup(t)
+  assert.match(run('sort fell 3'), /周りの木を 3 本切ります/)
+  assert.match(run('sort start'), /伐採中です/)
+  await controller.task.done
+  assert.equal(fells[0].count, 3)
+  assert.deepEqual(state().replant, [{ x: 3, y: 64, z: 0, name: 'oak_sapling' }])
+  assert.ok(reports.includes('伐採しました: 3 本（原木 12 個）'))
+  assert.ok(reports.some((m) => m.includes('sort replant')))
+})
+
+test('伐採の本数は 1 から上限まで', (t) => {
+  const { run, fells } = setup(t)
+  assert.match(run('sort fell 0'), /本数は 1 から 40 で指定してください/)
+  assert.match(run('sort fell 41'), /本数は 1 から 40 で指定してください/)
+  assert.equal(fells.length, 0)
+})
+
+test('整理中は伐採を受け付けない', async (t) => {
+  const { sorting, run, fells } = started(t)
+  await until(() => sorting.runs.length === 1)
+  assert.match(run('sort fell 2'), /整理中です/)
+  assert.equal(fells.length, 0)
 })

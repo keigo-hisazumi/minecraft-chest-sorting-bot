@@ -13,6 +13,10 @@ test('座標のあるコマンドを解釈する', () => {
   assert.deepEqual(parseCommand('sort exclude 1 2 3'), { type: 'exclude', position: { x: 1, y: 2, z: 3 } })
 })
 
+test('本数のあるコマンドを解釈する', () => {
+  assert.deepEqual(parseCommand('sort fell 5'), { type: 'fell', count: 5 })
+})
+
 test('sort で始まらない発言は無視する', () => {
   for (const message of ['stop', 'status', 'chest 1 2 3', 'sorting start', 'こんにちは', '']) {
     assert.equal(parseCommand(message), null)
@@ -20,7 +24,7 @@ test('sort で始まらない発言は無視する', () => {
 })
 
 test('形が正しくない sort の発言には使い方を返す', () => {
-  for (const message of ['sort', 'sort foo', 'sort start now', 'sort chest', 'sort chest 1 2', 'sort chest 1.5 2 3', 'sort exclude a b c']) {
+  for (const message of ['sort', 'sort foo', 'sort start now', 'sort chest', 'sort chest 1 2', 'sort chest 1.5 2 3', 'sort exclude a b c', 'sort fell', 'sort fell -1', 'sort fell 1.5', 'sort fell 3 4']) {
     assert.deepEqual(parseCommand(message), { type: 'help' }, message)
   }
 })

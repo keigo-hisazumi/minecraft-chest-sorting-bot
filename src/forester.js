@@ -256,19 +256,21 @@ async function fellTree(context, tree, records) {
  * @param {object} options
  * @param {number} options.wanted 必要な板材の数
  * @param {Array<object>} options.records チェストの中身
+ * @param {number} [options.maxTrees] 切る木の本数の上限（既定は TREE_LIMIT。TREE_LIMIT より多くはしない）
  * @param {Array<object>} options.pending 植え直していない場所
  * @param {(pending: Array<object>) => void} options.savePending 植え直していない場所を保存する関数
  * @returns {Promise<{ trees: number, logs: number, pending: object[], tall: number, exhausted: boolean, barehanded: boolean }>}
  *   exhausted は、必要な数が揃う前に切れる木がなくなったことを表す
  */
-async function gatherWood(context, { wanted, records, pending, savePending }) {
+async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pending, savePending }) {
   const { bot, signal, notify } = context
   const result = { trees: 0, logs: 0, pending, tall: 0, exhausted: false, barehanded: false }
   const skipped = new Set()
   // 伐採を始める前から空いている枠には、拾ったアイテムが入る
   const emptyBefore = new Set(hotbarSlots(bot.inventory).filter((slot) => !bot.inventory.slots[slot]))
   const stow = () => release(bot, (item, slot) => emptyBefore.has(slot) && PICKUP.test(item.name))
-  while (heldValue(bot) < wanted && result.trees < TREE_LIMIT && emptyCargoSlots(bot.inventory).length > 1) {
+  const limit = Math.min(maxTrees, TREE_LIMIT)
+  while (heldValue(bot) < wanted && result.trees < limit && emptyCargoSlots(bot.inventory).length > 1) {
     signal.throwIfAborted()
     const found = findTrees(bot, context.center)
     result.tall = found.tall
@@ -299,4 +301,4 @@ async function gatherWood(context, { wanted, records, pending, savePending }) {
   return result
 }
 
-module.exports = { gatherWood, replant, findTrees, createForestryMovements }
+module.exports = { TREE_LIMIT, gatherWood, replant, findTrees, createForestryMovements }
