@@ -38,6 +38,19 @@ function connect() {
     ready = true
     bot.chat('SortBot 起動')
     console.log(`接続しました: ${config.host}:${config.port}（${bot.version}）`)
+    try {
+      controller.resume()
+    } catch (err) {
+      console.error('整理を再開できませんでした:', err)
+    }
+  })
+
+  bot.on('death', () => {
+    try {
+      controller.onDeath()
+    } catch (err) {
+      console.error('死亡の処理に失敗しました:', err)
+    }
   })
 
   // 命令は、BOT 自身を除くすべてのプレイヤーから受け付ける

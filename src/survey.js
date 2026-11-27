@@ -48,7 +48,7 @@ async function readChest({ bot, navigator, signal }, positions) {
   }
   try {
     signal.throwIfAborted()
-    return { positions: current, items: window.containerItems().map(describeItem) }
+    return { positions: current, items: window.containerItems().map((item) => ({ ...describeItem(item), slot: item.slot })) }
   } finally {
     window.close()
   }
@@ -95,4 +95,4 @@ async function surveyChests({ bot, navigator, source, excluded, signal }) {
   return { source: sourceRecord, chests, failed }
 }
 
-module.exports = { surveyChests }
+module.exports = { surveyChests, readChest, REACH }

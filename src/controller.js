@@ -1,17 +1,25 @@
 // コマンドの実行（チェストの登録・除外、整理の開始と停止、調査と計画の表示、呼び寄せと現在位置の報告）
-// この段階では、BOT はアイテムを動かさない。移動するのは、調査するときと呼び寄せられたときだけ。
+// 整理を開始している間は、指定チェストを定期的に確認して、中身が変わったら整理する。
 
 const fs = require('node:fs')
 const path = require('node:path')
+const { setTimeout: sleep } = require('node:timers/promises')
 const { Vec3 } = require('vec3')
 const { CHEST_NAME, chestPositions, findNearestChest, sortPositions, formatPosition, formatChest, samePosition, overlaps } = require('./chests')
 const { HELP } = require('./commands')
 const { buildPlan } = require('./plan')
-const { formatSummary, formatDetail } = require('./planreport')
+const { formatSummary, formatDetail, formatResult } = require('./planreport')
+const { sortOnce, readSourceSignature } = require('./sorter')
 const { surveyChests } = require('./survey')
 
-// 調査中は受け付けないコマンド（移動や登録内容が、調査と食い違うため）
-const BLOCKED_WHILE_SURVEYING = new Set(['start', 'plan', 'chest', 'exclude', 'come'])
+// 調査やアイテムの移動をしている間は受け付けないコマンド（移動や登録内容が食い違うため）
+const BLOCKED_WHILE_BUSY = new Set(['start', 'plan', 'chest', 'exclude', 'come'])
+// 整理を開始している間は、次の確認を待っているときも受け付けないコマンド
+const BLOCKED_WHILE_SORTING = new Set(['start', 'plan'])
+// 指定チェストを確認する間隔（ミリ秒）
+const POLL_INTERVAL_MS = 30000
+// 使えないチェストがあった場合に、中身が変わらなくても整理をやり直すまでの確認の回数
+const RETRY_POLLS = 10
 
 class SortController {
   /**
@@ -23,8 +31,15 @@ class SortController {
    * @param {(message: string) => void} options.report 時間がかかるコマンドの経過の通知先
    * @param {string} options.planFile 詳しい計画を書き出すファイル
    * @param {typeof surveyChests} [options.survey] チェストを調査する関数
+   * @param {{ sortOnce: typeof sortOnce, readSourceSignature: typeof readSourceSignature }} [options.sorter] 整理を行うもの
+   * @param {number} [options.pollInterval] 指定チェストを確認する間隔（ミリ秒）
    */
-  constructor(bot, store, server, { navigator, report, planFile, survey = surveyChests }) {
+  constructor(
+    bot,
+    store,
+    server,
+    { navigator, report, planFile, survey = surveyChests, sorter = { sortOnce, readSourceSignature }, pollInterval = POLL_INTERVAL_MS }
+  ) {
     this.bot = bot
     this.store = store
     this.server = server
@@ -32,7 +47,9 @@ class SortController {
     this.report = report
     this.planFile = planFile
     this.survey = survey
-    // 実行中の調査。中止の合図と、終了を待つ Promise を持つ
+    this.sorter = sorter
+    this.pollInterval = pollInterval
+    // 実行中の調査か整理。中止の合図、作業中かどうか、終了を待つ Promise を持つ
     this.task = null
   }
 
@@ -49,9 +66,8 @@ class SortController {
    * @returns {string[]} すぐに返す文
    */
   execute(command, username) {
-    if (this.task && BLOCKED_WHILE_SURVEYING.has(command.type)) {
-      return [this.task.abort.signal.aborted ? '調査を中止しています。少し待ってください' : '調査中です。中止するには sort stop と発言してください']
-    }
+    const refusal = this.refusal(command.type)
+    if (refusal) return [refusal]
     switch (command.type) {
       case 'plan':
         return this.plan()
@@ -72,6 +88,17 @@ class SortController {
       default:
         return [HELP]
     }
+  }
+
+  // 実行中の作業があるため受け付けない場合は、その理由を返す
+  refusal(type) {
+    if (!this.task) return null
+    const name = this.task.type === 'sort' ? '整理' : '調査'
+    if (this.task.abort.signal.aborted) {
+      return BLOCKED_WHILE_BUSY.has(type) ? `${name}を中止しています。少し待ってください` : null
+    }
+    const blocked = (this.task.busy && BLOCKED_WHILE_BUSY.has(type)) || (this.task.type === 'sort' && BLOCKED_WHILE_SORTING.has(type))
+    return blocked ? `${name}中です。中止するには sort stop と発言してください` : null
   }
 
   /**
@@ -131,7 +158,80 @@ class SortController {
     }
     world.running = true
     this.store.set(this.worldKey, world)
-    return ['整理の開始を受け付けました（アイテムを移す動作は、まだありません）']
+    this.startSorting()
+    return ['整理を開始します。やめるときは sort stop と発言してください']
+  }
+
+  // 再接続や再起動のあと、開始の状態なら整理を再開する
+  resume() {
+    const { running, source } = this.store.get(this.worldKey)
+    if (!running || !source || this.task) return
+    this.report('整理を再開します')
+    this.startSorting()
+  }
+
+  // BOT が死亡したら整理を止める（落としたアイテムの回収は、まだできない）
+  onDeath() {
+    const { running } = this.store.get(this.worldKey)
+    if (!running && !this.task) return
+    const position = formatPosition(this.bot.entity.position.floored())
+    this.stop()
+    this.report(`${position} で死亡したため、整理を停止しました。落としたアイテムは消える前に回収してください`)
+  }
+
+  startSorting() {
+    this.navigator.cancel()
+    const task = { type: 'sort', abort: new AbortController(), busy: true }
+    this.task = task
+    task.done = this.runSorting(task).finally(() => {
+      this.task = null
+    })
+  }
+
+  async runSorting(task) {
+    const { signal } = task.abort
+    // 整理したあとの指定チェストの中身。null なら、次の確認で整理する
+    let signature = null
+    let polls = 0
+    let reported = ''
+    const tell = (lines) => {
+      for (const line of lines) this.report(line)
+    }
+    while (!signal.aborted) {
+      try {
+        task.busy = true
+        const key = this.worldKey
+        const world = this.store.get(key)
+        if (!world.running || !world.source) return
+        const context = { bot: this.bot, navigator: this.navigator, world, signal }
+        const unchanged = signature !== null && (await this.sorter.readSourceSignature(context)) === signature.value
+        if (!unchanged || (signature.retry && ++polls >= RETRY_POLLS)) {
+          const result = await this.sorter.sortOnce({
+            ...context,
+            saveAssignments: (assignments) => this.store.set(key, { ...this.store.get(key), assignments })
+          })
+          signature = { value: result.signature, retry: result.failed.length > 0 }
+          polls = 0
+          const lines = formatResult(result)
+          // 何も移さず、前回と同じ内容なら、繰り返して知らせない
+          if (result.delivered > 0 || lines.join('\n') !== reported) tell(lines)
+          reported = lines.join('\n')
+        }
+      } catch (err) {
+        if (signal.aborted) return
+        signature = null
+        const message = `整理できませんでした: ${err.message}（あとでもう一度試します）`
+        if (message !== reported) {
+          console.error('整理に失敗しました:', err)
+          this.report(message)
+        }
+        reported = message
+      } finally {
+        task.busy = false
+      }
+      // 中止された場合は、待たずに終える
+      await sleep(this.pollInterval, undefined, { signal }).catch(() => {})
+    }
   }
 
   // 指定がない場合は一番近いチェストを登録し、改めて開始の指示を待つ
@@ -145,15 +245,16 @@ class SortController {
   }
 
   stop() {
-    // 保存に失敗しても調査と移動は止まるように、先に中止する
+    const sorting = this.task?.type === 'sort'
+    // 保存に失敗しても作業と移動は止まるように、先に中止する
     this.dispose()
     const world = this.store.get(this.worldKey)
     world.running = false
     this.store.set(this.worldKey, world)
-    return ['整理と移動を停止しました']
+    return ['整理と移動を停止しました', ...(sorting ? ['運んでいる途中のアイテムがあれば BOT が持っています。sort start で続きを行います'] : [])]
   }
 
-  // 調査と移動を中止する（停止の指示と、切断したときに使う）
+  // 調査、整理、移動を中止する（停止の指示と、切断したときに使う）
   dispose() {
     this.task?.abort.abort()
     this.navigator.cancel()
@@ -164,7 +265,7 @@ class SortController {
     const world = this.store.get(this.worldKey)
     if (!world.source) return ['指定チェストがありません。sort chest か sort start で登録してください']
     this.navigator.cancel()
-    const task = { abort: new AbortController() }
+    const task = { type: 'plan', abort: new AbortController(), busy: true }
     this.task = task
     task.done = this.runPlan(world, task.abort.signal).finally(() => {
       this.task = null
@@ -181,7 +282,7 @@ class SortController {
         excluded: world.excluded,
         signal
       })
-      const plan = buildPlan(survey)
+      const plan = buildPlan(survey, { previous: world.assignments })
       const summary = formatSummary(plan, failed)
       try {
         fs.mkdirSync(path.dirname(this.planFile), { recursive: true })
