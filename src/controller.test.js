@@ -113,12 +113,12 @@ test('調査が終わると、要約を知らせて詳しい計画を保存す�
   t.mock.method(console, 'log', () => {})
   bot.putChest(2, 64, 0)
   run('sort chest 2 64 0')
-  assert.match(run('sort plan'), /調査を始めます/)
+  assert.match(run('sort plan'), /調査します: 周りのチェスト/)
   assert.deepEqual(surveys[0].options.source, [{ x: 2, y: 64, z: 0 }])
   const { done } = controller.task
   surveys[0].resolve(surveyResult)
   await done
-  assert.match(reports[0], /調査完了: チェスト 1 個/)
+  assert.match(reports[0], /調査しました: チェスト 1 個/)
   assert.match(fs.readFileSync(planFile, 'utf8'), /\[廃棄予定\]/)
   assert.equal(controller.task, null)
 })
@@ -132,7 +132,7 @@ test('調査中は登録の変更や移動を受け付けず、停止で中止�
   for (const text of ['sort start', 'sort plan', 'sort chest 5 64 0', 'sort exclude 5 64 0', 'sort come']) {
     assert.match(run(text), /調査中です/, text)
   }
-  assert.match(run('sort status'), /指定チェスト: 2 64 0/)
+  assert.match(run('sort status'), /指定チェスト: \(2, 64, 0\)/)
   const { done } = controller.task
   run('sort stop')
   assert.ok(surveys[0].options.signal.aborted)
@@ -140,7 +140,7 @@ test('調査中は登録の変更や移動を受け付けず、停止で中止�
   await done
   assert.deepEqual(reports, [])
   assert.equal(state().excluded.length, 0)
-  assert.match(run('sort plan'), /調査を始めます/)
+  assert.match(run('sort plan'), /調査します: 周りのチェスト/)
   controller.dispose()
 })
 
@@ -153,7 +153,7 @@ test('調査に失敗したら理由を知らせる', async (t) => {
   const { done } = controller.task
   surveys[0].reject(new Error('指定チェストを調査できません'))
   await done
-  assert.deepEqual(reports, ['調査に失敗しました: 指定チェストを調査できません'])
+  assert.deepEqual(reports, ['調査できませんでした: 指定チェストを調査できません'])
 })
 
 test('呼び寄せは発言したプレイヤーへの移動を始め、停止で中止する', (t) => {
@@ -166,7 +166,7 @@ test('呼び寄せは発言したプレイヤーへの移動を始め、停止�
 test('現在地を、ブロックの座標で答える', (t) => {
   const { bot, run } = setup(t)
   bot.entity.position = new Vec3(-3.5, 64.9, 10.2)
-  assert.equal(run('sort pos'), '現在地: -4 64 10')
+  assert.equal(run('sort pos'), '現在地: (-4, 64, 10)')
 })
 
 test('再起動後も、指定チェスト・除外・開始の状態が残る', (t) => {
@@ -180,9 +180,9 @@ test('再起動後も、指定チェスト・除外・開始の状態が残る',
   const restarted = boot()
   assert.deepEqual(restarted.store.get(restarted.worldKey), controller.store.get(controller.worldKey))
   const status = run('sort status', restarted)
-  assert.match(status, /状態: 開始/)
-  assert.match(status, /指定チェスト: 2 64 0/)
-  assert.match(status, /除外したチェスト: 5 64 0/)
+  assert.match(status, /整理を開始しています/)
+  assert.match(status, /指定チェスト: \(2, 64, 0\)/)
+  assert.match(status, /除外したチェスト: 1 個（\(5, 64, 0\)）/)
 })
 
 test('指定チェストは 1 つだけで、指定し直すと上書きする', (t) => {
@@ -212,7 +212,7 @@ test('通常のチェストがない座標と、読み込まれていない座�
   bot.unload(500, 64, 0)
   assert.match(run('sort chest 2 64 0'), /通常のチェストがありません/)
   assert.match(run('sort exclude 3 64 0'), /通常のチェストがありません/)
-  assert.match(run('sort chest 500 64 0'), /読み込まれていない/)
+  assert.match(run('sort chest 500 64 0'), /読み込まれていません/)
   assert.equal(state().source, null)
   assert.equal(state().excluded.length, 0)
 })
@@ -237,7 +237,7 @@ test('指定がなければ一番近いチェストを登録し、次の開始�
   bot.putChest(2, 64, 0)
   bot.putChest(5, 64, 0)
   run('sort exclude 2 64 0')
-  assert.match(run('sort start'), /自動で登録しました: 5 64 0/)
+  assert.match(run('sort start'), /登録しました: 指定チェスト \(5, 64, 0\)（一番近いチェストを自動で選びました/)
   assert.deepEqual(state().source, { positions: [{ x: 5, y: 64, z: 0 }], auto: true })
   assert.equal(state().running, false)
   run('sort start')
@@ -248,7 +248,7 @@ test('指定がなければ一番近いチェストを登録し、次の開始�
 
 test('付近にチェストがなければ通知して停止する', (t) => {
   const { run, state } = setup(t)
-  assert.match(run('sort start'), /付近にチェストがないため、停止します/)
+  assert.match(run('sort start'), /登録できませんでした: 指定チェスト（付近にチェストがありません）/)
   assert.equal(state().source, null)
   assert.equal(state().running, false)
 })
@@ -281,7 +281,7 @@ test('開始すると整理し、指定チェストの中身が変わるたび�
   sorting.signature = 'b'
   await until(() => sorting.runs.length === 2)
   // 同じ内容の結果は、繰り返して知らせない
-  assert.deepEqual(reports, ['移せるアイテムはありません'])
+  assert.deepEqual(reports, ['整理しました: 移せるアイテムはありません'])
 })
 
 test('使えないチェストがあれば、中身が変わらなくても、しばらくしてやり直す', async (t) => {
@@ -361,7 +361,7 @@ test('整理中は植え直しを受け付けず、停止してから植え直�
   sorting.runs[0].saveReplant(spots)
   assert.match(run('sort replant'), /整理中です/)
   await stop()
-  assert.match(run('sort replant'), /植え直しを始めます（1 か所）/)
+  assert.match(run('sort replant'), /植え直しします: 1 か所/)
   assert.match(run('sort start'), /植え直し中です/)
   const { done } = controller.task
   surveys[0].resolve(surveyResult)
@@ -369,8 +369,8 @@ test('整理中は植え直しを受け付けず、停止してから植え直�
   assert.deepEqual(replants[0].pending, spots)
   assert.equal(replants[0].records.length, 1)
   assert.deepEqual(state().replant, [])
-  assert.equal(reports.at(-1), '苗木を 1 個植えました')
-  assert.match(run('sort replant'), /植え直す場所はありません/)
+  assert.equal(reports.at(-1), '植え直ししました: 苗木 1 個')
+  assert.match(run('sort replant'), /植え直す場所がありません/)
 })
 
 test('伐採とクラフトの通知は、チャットへ知らせる', async (t) => {
@@ -385,7 +385,7 @@ test('死亡したら整理を停止して場所を知らせる', async (t) => {
   await until(() => sorting.runs.length === 1)
   controller.onDeath()
   assert.equal(state().running, false)
-  assert.match(reports.at(-1), /0 64 0 で死亡した/)
+  assert.match(reports.at(-1), /整理を中止しました: \(0, 64, 0\) で死亡しました/)
 })
 
 test('登録はディメンションごとに分ける', (t) => {
@@ -398,7 +398,7 @@ test('登録はディメンションごとに分ける', (t) => {
 
 test('指示した本数だけ伐採し、切った場所を植え直し用に記録する', async (t) => {
   const { run, controller, state, reports, fells } = setup(t)
-  assert.match(run('sort fell 3'), /周りの木を 3 本切ります/)
+  assert.match(run('sort fell 3'), /伐採します: 周りの木 3 本/)
   assert.match(run('sort start'), /伐採中です/)
   await controller.task.done
   assert.equal(fells[0].count, 3)

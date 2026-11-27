@@ -1,6 +1,7 @@
 // 振り分けの計画を、チャット向けの要約と、ファイル向けの詳細な文にする
 
 const { formatPosition, formatChest } = require('./chests')
+const { message } = require('./messages')
 
 // チャットに名前を並べる件数の上限（発言が多いと、サーバーに切断されるため要約する）
 const CHAT_LIST_LIMIT = 3
@@ -22,7 +23,7 @@ const target = (chest) => (chest ? formatChest(chest) : '新しいチェスト')
 function formatSummary(plan, failed) {
   const planksText = plan.planks > 0 ? `（板材 ${plan.planks} 枚。作業台がなければ追加で 4 枚）` : ''
   const lines = [
-    `調査完了: チェスト ${plan.chestCount} 個、アイテム ${plan.itemKinds} 種類`,
+    message.done('調査', `チェスト ${plan.chestCount} 個、アイテム ${plan.itemKinds} 種類`),
     `専用 ${plan.dedicated.length} 種類 / 混合 ${plan.mixed.items.length} 種類（混合チェスト ${plan.mixed.chests.length} 個） / 保護対象チェスト ${plan.protected.chests.length} 個`,
     `必要な作業: 新しい大きなチェスト ${plan.newChests} 個、単体チェストの拡張 ${plan.expansions.length} 個${planksText}`,
     plan.discard.length > 0 ? `廃棄予定: ${shorten(plan.discard.map((d) => `${d.name} ${d.count} 個`))}` : '廃棄予定: なし'
@@ -30,7 +31,7 @@ function formatSummary(plan, failed) {
   if (failed.length > 0) {
     lines.push(`調査できなかったチェスト（計画に含みません）: ${shorten(failed.map((f) => `${formatPosition(f.positions[0])} ${f.reason}`))}`)
   }
-  lines.push('アイテムは動かしていません。詳しい計画は data/plan.txt を確認してください')
+  lines.push('アイテムは動かしていません（詳しい計画は data/plan.txt を確認してください）')
   return lines
 }
 
@@ -79,7 +80,7 @@ function formatDetail(plan, failed) {
  * @returns {string[]} 発言する文
  */
 function formatResult(result) {
-  const lines = [result.delivered > 0 ? `整理しました: ${result.delivered} 個を移しました` : '移せるアイテムはありません']
+  const lines = [message.done('整理', result.delivered > 0 ? `合計 ${result.delivered} 個` : '移せるアイテムはありません')]
   const {
     expanded = 0,
     created = 0,
@@ -90,19 +91,19 @@ function formatResult(result) {
     notes = [],
     problems = []
   } = result.build ?? {}
-  if (trees > 0) lines.push(`木を ${trees} 本伐採して原木 ${logs} 個を集めました`)
-  if (pendingReplant > 0) lines.push(`植え直していない場所が ${pendingReplant} か所あります。植え直すには sort replant と発言してください`)
+  if (trees > 0) lines.push(message.done('伐採', `${trees} 本`, `原木 ${logs} 個`))
+  if (pendingReplant > 0) lines.push(`植え直していない場所が ${pendingReplant} か所あります（植え直すには sort replant と発言してください）`)
   lines.push(...notes)
-  const done = [
-    ...(created > 0 ? [`大きなチェストを ${created} 個置きました`] : []),
-    ...(expanded > 0 ? [`単体チェストを ${expanded} 個広げました`] : []),
-    ...(tablePlaced ? ['作業台を置きました'] : [])
+  const placed = [
+    ...(created > 0 ? [`大きなチェスト ${created} 個`] : []),
+    ...(expanded > 0 ? [`単体チェストを広げる分 ${expanded} 個`] : []),
+    ...(tablePlaced ? ['作業台'] : [])
   ]
-  if (done.length > 0) lines.push(done.join('。'))
+  if (placed.length > 0) lines.push(message.done('設置', placed.join('、')))
   lines.push(...problems)
   const { discarded = {}, remaining = 0, problem = null } = result.discard ?? {}
   const thrown = Object.entries(discarded).map(([name, count]) => `${name} ${count} 個`)
-  if (thrown.length > 0) lines.push(`廃棄しました: ${shorten(thrown)}`)
+  if (thrown.length > 0) lines.push(message.done('廃棄', shorten(thrown)))
   if (problem) lines.push(problem)
   if (remaining > 0) lines.push(`廃棄する予定の ${remaining} 個が残っています`)
   if (result.shortage.length > 0) lines.push(`専用にする大きなチェストが足りないため残しています: ${shorten(result.shortage)}`)

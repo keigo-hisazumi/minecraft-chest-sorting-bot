@@ -97,7 +97,7 @@ test('専用チェストに入りきらない分を廃棄し、アイテム名�
     log(),
     Array.from({ length: 3 }, () => ({ result: '廃棄', name: 'stone', count: 64 }))
   )
-  assert.deepEqual(notices, ['廃棄します: stone 192 個'])
+  assert.deepEqual(notices.filter((n) => n.startsWith('廃棄')), ['廃棄します: stone 192 個'])
 })
 
 test('整理先にもともとある分も、専用チェストに入りきらなければ廃棄する', async (t) => {
@@ -196,7 +196,7 @@ test('サボテンへ行けなければ、投げずに残す', async (t) => {
   const { world, source, sort, log } = setup(t, stacks('stone', 3), { outcome: () => 'unreachable' })
   world.large(5, stacks('stone', 54))
   const result = await sort()
-  assert.match(result.discard.problem, /近くへ行けない/)
+  assert.match(result.discard.problem, /近くへ行けません/)
   assert.equal(countOf(source, 'stone'), 192)
   assert.deepEqual(log(), [{ result: '投てきせず', name: 'stone', count: 64 }])
 })

@@ -7,6 +7,7 @@ const { setTimeout: sleep } = require('node:timers/promises')
 const { Vec3 } = require('vec3')
 const { CHEST_NAME, chestPositions, findNearestChest, sortPositions, formatPosition, formatChest, samePosition, overlaps } = require('./chests')
 const { HELP } = require('./commands')
+const { message } = require('./messages')
 const { findTable } = require('./builder')
 const { TREE_LIMIT, gatherWood, replant } = require('./forester')
 const { buildPlan } = require('./plan')
@@ -128,41 +129,43 @@ class SortController {
     if (!this.task) return null
     const name = TASK_NAMES[this.task.type]
     if (this.task.abort.signal.aborted) {
-      return BLOCKED_WHILE_BUSY.has(type) ? `${name}を中止しています。少し待ってください` : null
+      return BLOCKED_WHILE_BUSY.has(type) ? `${name}を中止しています（少し待ってから発言してください）` : null
     }
     const blocked = (this.task.busy && BLOCKED_WHILE_BUSY.has(type)) || (this.task.type === 'sort' && BLOCKED_WHILE_SORTING.has(type))
-    return blocked ? `${name}中です。中止するには sort stop と発言してください` : null
+    return blocked ? message.busy(name, 'sort stop') : null
   }
 
   /**
    * 指定した座標のチェストを調べる
    *
    * @param {{ x: number, y: number, z: number }} position
+   * @param {string} action 失敗したときに知らせる作業名
    * @returns {{ positions: Array<object> } | { error: string }}
    */
-  inspect({ x, y, z }) {
+  inspect({ x, y, z }, action) {
     const block = this.bot.blockAt(new Vec3(x, y, z))
-    if (!block) return { error: `(${x}, ${y}, ${z}) は読み込まれていないため確認できません。BOT の近くのチェストを指定してください` }
-    if (block.name !== CHEST_NAME) return { error: `(${x}, ${y}, ${z}) に通常のチェストがありません` }
+    const target = `チェスト ${formatPosition({ x, y, z })}`
+    if (!block) return { error: message.failed(action, target, '読み込まれていません。BOT の近くのチェストを指定してください') }
+    if (block.name !== CHEST_NAME) return { error: message.failed(action, target, '通常のチェストがありません') }
     return { positions: chestPositions(block) }
   }
 
   registerSource(position) {
-    const { positions, error } = this.inspect(position)
+    const { positions, error } = this.inspect(position, '登録')
     if (error) return [error]
     const world = this.store.get(this.worldKey)
-    if (world.excluded.some((chest) => overlaps(chest, positions))) return ['除外したチェストは指定チェストにできません']
+    if (world.excluded.some((chest) => overlaps(chest, positions))) return [message.failed('登録', `指定チェスト ${formatChest(positions)}`, '除外したチェストは指定チェストにできません')]
     world.source = { positions, auto: false }
     this.store.set(this.worldKey, world)
-    return [`指定チェストを登録しました: ${formatChest(positions)}`]
+    return [message.done('登録', `指定チェスト ${formatChest(positions)}`)]
   }
 
   exclude(position) {
-    const { positions, error } = this.inspect(position)
+    const { positions, error } = this.inspect(position, '除外')
     if (error) return [error]
     const world = this.store.get(this.worldKey)
     if (world.source && overlaps(world.source.positions, positions)) {
-      return ['指定チェストは除外できません。先に sort chest で別のチェストを指定してください']
+      return [message.failed('除外', `チェスト ${formatChest(positions)}`, '指定チェストは除外できません。先に sort chest で別のチェストを指定してください')]
     }
     const matched = world.excluded.filter((chest) => overlaps(chest, positions))
     // 登録済みの座標と合わせて 1 つにまとめる
@@ -172,7 +175,7 @@ class SortController {
     }
     world.excluded = [...world.excluded.filter((chest) => !matched.includes(chest)), sortPositions(merged)]
     this.store.set(this.worldKey, world)
-    return [`チェストを除外しました: ${formatChest(positions)}`]
+    return [message.done('除外', `チェスト ${formatChest(positions)}`)]
   }
 
   start() {
@@ -187,14 +190,14 @@ class SortController {
     if (missing) {
       world.running = false
       this.store.set(this.worldKey, world)
-      return [`指定チェスト (${formatPosition(world.source.positions[0])}) が見つかりません。sort chest で指定し直してください`]
+      return [message.failed('整理', `指定チェスト ${formatPosition(world.source.positions[0])} が見つかりません`, 'sort chest で指定し直してください')]
     }
     world.running = true
     this.store.set(this.worldKey, world)
     this.startSorting()
     return [
-      '整理を開始します。やめるときは sort stop と発言してください',
-      '専用チェストに入りきらないアイテムは、範囲内にサボテンがあれば投げて廃棄します。元に戻せません'
+      message.start('整理', `指定チェスト ${formatChest(world.source.positions)}`, '中止するには sort stop と発言してください'),
+      '専用チェストに入りきらないアイテムは、範囲内にサボテンがあれば投げて廃棄します（元に戻せません）'
     ]
   }
 
@@ -202,7 +205,7 @@ class SortController {
   resume() {
     const { running, source } = this.store.get(this.worldKey)
     if (!running || !source || this.task) return
-    this.report('整理を再開します')
+    this.report(message.start('整理', `指定チェスト ${formatChest(source.positions)}`, '前回の続きです'))
     this.startSorting()
   }
 
@@ -212,7 +215,7 @@ class SortController {
     if (!running && !this.task) return
     const position = formatPosition(this.bot.entity.position.floored())
     this.stop()
-    this.report(`${position} で死亡したため、整理を停止しました。落としたアイテムは消える前に回収してください`)
+    this.report(message.stopped('整理', `${position} で死亡しました`, '落としたアイテムは消える前に回収してください'))
   }
 
   startSorting() {
@@ -263,12 +266,12 @@ class SortController {
       } catch (err) {
         if (signal.aborted) return
         signature = null
-        const message = `整理できませんでした: ${err.message}（あとでもう一度試します）`
-        if (message !== reported) {
+        const text = message.failed('整理', err.message, 'あとでもう一度試します')
+        if (text !== reported) {
           console.error('整理に失敗しました:', err)
-          this.report(message)
+          this.report(text)
         }
-        reported = message
+        reported = text
       } finally {
         task.busy = false
       }
@@ -283,8 +286,8 @@ class SortController {
     world.running = false
     if (positions) world.source = { positions, auto: true }
     this.store.set(this.worldKey, world)
-    if (!positions) return ['付近にチェストがないため、停止します']
-    return [`一番近いチェストを指定チェストに自動で登録しました: ${formatChest(positions)}`, 'このチェストでよければ、もう一度 sort start と発言してください']
+    if (!positions) return [message.failed('登録', '指定チェスト', '付近にチェストがありません')]
+    return [message.done('登録', `指定チェスト ${formatChest(positions)}`, '一番近いチェストを自動で選びました。このチェストでよければ、もう一度 sort start と発言してください')]
   }
 
   stop() {
@@ -294,7 +297,10 @@ class SortController {
     const world = this.store.get(this.worldKey)
     world.running = false
     this.store.set(this.worldKey, world)
-    return ['整理と移動を停止しました', ...(sorting ? ['運んでいる途中のアイテムがあれば BOT が持っています。sort start で続きを行います'] : [])]
+    return [
+      message.done('停止', '整理と移動'),
+      ...(sorting ? ['運んでいる途中のアイテムがあれば BOT が持っています（続きは sort start と発言してください）'] : [])
+    ]
   }
 
   // 調査、整理、移動を中止する（停止の指示と、切断したときに使う）
@@ -306,14 +312,14 @@ class SortController {
   // 調査して計画を表示する。結果は、終わり次第 report で知らせる
   plan() {
     const world = this.store.get(this.worldKey)
-    if (!world.source) return ['指定チェストがありません。sort chest か sort start で登録してください']
+    if (!world.source) return [message.failed('調査', '指定チェストがありません', 'sort chest か sort start で登録してください')]
     this.navigator.cancel()
     const task = { type: 'plan', abort: new AbortController(), busy: true }
     this.task = task
     task.done = this.runPlan(world, task.abort.signal).finally(() => {
       this.task = null
     })
-    return ['チェストの調査を始めます。アイテムは動かしません']
+    return [message.start('調査', '周りのチェスト', 'アイテムは動かしません')]
   }
 
   async runPlan(world, signal) {
@@ -332,7 +338,7 @@ class SortController {
         fs.writeFileSync(this.planFile, formatDetail(plan, failed))
       } catch (err) {
         console.error('計画を保存できませんでした:', err.message)
-        summary[summary.length - 1] = `アイテムは動かしていません。詳しい計画は保存できませんでした: ${err.message}`
+        summary[summary.length - 1] = `アイテムは動かしていません（詳しい計画は保存できませんでした: ${err.message}）`
       }
       console.log(formatDetail(plan, failed))
       for (const line of summary) this.report(line)
@@ -340,7 +346,7 @@ class SortController {
       // 中止した調査の結果は知らせない
       if (signal.aborted) return
       console.error('調査に失敗しました:', err)
-      this.report(`調査に失敗しました: ${err.message}`)
+      this.report(message.failed('調査', err.message))
     }
   }
 
@@ -353,14 +359,14 @@ class SortController {
     const key = this.worldKey
     const world = this.store.get(key)
     const pending = world.replant ?? []
-    if (pending.length === 0) return ['植え直す場所はありません']
+    if (pending.length === 0) return [message.failed('植え直し', '植え直す場所がありません')]
     this.navigator.cancel()
     const task = { type: 'replant', abort: new AbortController(), busy: true }
     this.task = task
     task.done = this.runReplant(key, world, pending, task.abort.signal).finally(() => {
       this.task = null
     })
-    return [`植え直しを始めます（${pending.length} か所）`]
+    return [message.start('植え直し', `${pending.length} か所`, '中止するには sort stop と発言してください')]
   }
 
   async runReplant(key, world, pending, signal) {
@@ -374,13 +380,13 @@ class SortController {
       }
       const result = await this.replanter(context, pending, records)
       this.saveReplant(key, result.pending)
-      this.report(`苗木を ${result.planted} 個植えました`)
-      if (result.pending.length > 0) this.report(`苗木がないなどで、${result.pending.length} か所は植えていません`)
+      const rest = result.pending.length > 0 ? `苗木がないなどで ${result.pending.length} か所は植えていません` : null
+      this.report(message.done('植え直し', `苗木 ${result.planted} 個`, rest))
     } catch (err) {
       // 中止した場合は知らせない。植えた場所は、次の指示で対象から外れる
       if (signal.aborted) return
       console.error('植え直しに失敗しました:', err)
-      this.report(`植え直しに失敗しました: ${err.message}`)
+      this.report(message.failed('植え直し', err.message))
     }
   }
 
@@ -395,7 +401,7 @@ class SortController {
     task.done = this.runFell(key, world, count, task.abort.signal).finally(() => {
       this.task = null
     })
-    return [`周りの木を ${count} 本切ります。やめるときは sort stop と発言してください`]
+    return [message.start('伐採', `周りの木 ${count} 本`, '中止するには sort stop と発言してください')]
   }
 
   async runFell(key, world, count, signal) {
@@ -410,19 +416,26 @@ class SortController {
         pending: world.replant ?? [],
         savePending: (spots) => this.saveReplant(key, spots)
       })
-      const lines = [`伐採しました: ${result.trees} 本（原木 ${result.logs} 個）`]
-      if (result.trees < count) {
-        lines.push(result.exhausted ? '周りに切れる木が残っていません' : '持ち物の空きがなくなったため、途中でやめました')
-      }
+      const lines = [
+        result.trees < count
+          ? message.stopped(
+              '伐採',
+              result.exhausted ? '周りに切れる木が残っていません' : '持ち物の空きがなくなりました',
+              `切ったのは ${result.trees} 本、原木 ${result.logs} 個`
+            )
+          : message.done('伐採', `${result.trees} 本`, `原木 ${result.logs} 個`)
+      ]
       if (result.tall > 0) lines.push(`大きすぎて切らなかった木: ${result.tall} 本`)
       if (result.barehanded) lines.push('斧を用意できなかったため、素手で切りました')
-      if (result.pending.length > 0) lines.push(`植え直すときは sort replant と発言してください（${result.pending.length} か所）`)
+      if (result.pending.length > 0) {
+        lines.push(`植え直していない場所が ${result.pending.length} か所あります（植え直すには sort replant と発言してください）`)
+      }
       for (const line of lines) this.report(line)
     } catch (err) {
       // 中止した場合は知らせない。切った場所は記録してある
       if (signal.aborted) return
       console.error('伐採に失敗しました:', err)
-      this.report(`伐採に失敗しました: ${err.message}`)
+      this.report(message.failed('伐採', err.message))
     }
   }
 
@@ -430,7 +443,7 @@ class SortController {
   come(username) {
     this.navigator.come(username, this.report).catch((err) => {
       console.error('移動に失敗しました:', err)
-      this.report(`移動できませんでした: ${err.message}`)
+      this.report(message.failed('移動', err.message))
     })
     return []
   }
@@ -442,8 +455,9 @@ class SortController {
   status() {
     const { source, excluded, running, replant: pending = [] } = this.store.get(this.worldKey)
     const sourceText = source ? `${formatChest(source.positions)}${source.auto ? '（自動）' : ''}` : '未登録'
-    const lines = [`状態: ${running ? '開始' : '停止'} / 指定チェスト: ${sourceText} / 除外: ${excluded.length} 個`]
-    if (excluded.length > 0) lines.push(`除外したチェスト: ${excluded.map(formatChest).join('、')}`)
+    const activity = this.task ? `${TASK_NAMES[this.task.type]}中` : '待機中'
+    const lines = [message.state(activity), `指定チェスト: ${sourceText}${running ? '（整理を開始しています）' : ''}`, `除外したチェスト: ${excluded.length} 個`]
+    if (excluded.length > 0) lines[2] += `（${excluded.map(formatChest).join('、')}）`
     if (pending.length > 0) lines.push(`植え直していない場所: ${pending.length} か所`)
     return lines
   }

@@ -2,6 +2,7 @@
 
 const { Movements, goals } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
+const { message } = require('./messages')
 
 // プレイヤーから、この距離（ブロック）まで近づいたら到着とする
 const NEAR_DISTANCE = 1
@@ -177,14 +178,14 @@ class Navigator {
   async come(username, report) {
     const target = this.bot.players[username]?.entity
     if (!target) {
-      report('姿が見えません。BOT の近くで発言してください')
+      report(message.failed('移動', `${username} のそば`, '姿が見えません。BOT の近くで発言してください'))
       return
     }
     const { x, y, z } = target.position
-    report(`${username} のそばへ向かいます`)
+    report(message.start('移動', `${username} のそば`))
     const { status, reason } = await this.moveTo(new goals.GoalNear(x, y, z, NEAR_DISTANCE))
-    if (status === 'arrived') report('到着しました')
-    if (status === 'failed') report(`そばまで行けませんでした${reason ? `: ${reason}` : ''}`)
+    if (status === 'arrived') report(message.done('移動', `${username} のそば`))
+    if (status === 'failed') report(message.failed('移動', `${username} のそば`, reason))
   }
 
   // 移動を中止する

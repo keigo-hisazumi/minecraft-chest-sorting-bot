@@ -4,6 +4,7 @@
 
 const { goals } = require('mineflayer-pathfinder')
 const { isInRange, formatPosition } = require('./chests')
+const { message } = require('./messages')
 const { countPlanks, plankValue, planksPerLog, isPlank, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
 const { createMovements } = require('./navigation')
 const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves } = require('./trees')
@@ -112,19 +113,19 @@ async function ensureAxe(context, records) {
   if (heldValue(bot) < planks) return false
   signal.throwIfAborted()
   if (countPlanks(cargoStacks(bot.inventory)) < planks) {
-    notify('クラフトします: 板材')
+    notify(message.start('クラフト', '板材'))
     await craftPlanks(bot, planks, signal)
   }
   const table = await getTable({ create: true })
   if (!table) return false
   if (sticks() < 2) {
-    notify('クラフトします: 棒')
+    notify(message.start('クラフト', '棒'))
     await craftSticks(bot)
   }
   const reached = await context.navigator.moveTo(new goals.GoalLookAtBlock(table.position, bot.world, { reach: DIG_REACH }))
   signal.throwIfAborted()
   if (reached.status !== 'arrived') return false
-  notify(`クラフトします: ${name === 'stone_axe' ? '石の斧' : '木の斧'}`)
+  notify(message.start('クラフト', name === 'stone_axe' ? '石の斧' : '木の斧'))
   await craftAxe(bot, table, name)
   return holdAxe(bot)
 }
@@ -147,7 +148,7 @@ async function digAt(context, position, name, near) {
   try {
     await bot.dig(target(), true)
   } catch (err) {
-    console.error(`(${formatPosition(position)}) を壊せませんでした:`, err.message)
+    console.error(`${formatPosition(position)} を壊せませんでした:`, err.message)
   }
   signal.throwIfAborted()
   return target()?.name !== name
@@ -226,7 +227,7 @@ async function replant(context, pending, records) {
       try {
         await bot.placeBlock(bot.blockAt(cell.offset(0, -1, 0)), cell.minus(floor.position))
       } catch (err) {
-        console.error(`(${formatPosition(cell)}) に苗木を植えられませんでした:`, err.message)
+        console.error(`${formatPosition(cell)} に苗木を植えられませんでした:`, err.message)
         signal.throwIfAborted()
       }
       await bot.waitForTicks(5)
@@ -284,6 +285,8 @@ async function fellTree(context, tree, records) {
   }
   if (cut > 0) await collectDrops(context, base)
   if (cut > 0 && tree.logs.some((p) => bot.blockAt(p)?.name === `${tree.type}_log`)) {
+    const high = tree.logs.filter((p) => bot.blockAt(p)?.name === `${tree.type}_log`).length
+    context.notify?.(message.start('伐採', `高いところの原木 ${high} 個`, '幹に足場を積んで登ります'))
     cut += await climbTree(context, tree, records)
     await collectDrops(context, base)
   }
@@ -321,7 +324,7 @@ async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pen
       break
     }
     skipped.add(tree.base[0].toString())
-    notify(`伐採します: ${TREE_LABELS[tree.type]} (${formatPosition(tree.base[0])})`)
+    notify(message.start('伐採', `${TREE_LABELS[tree.type]} ${formatPosition(tree.base[0])}`))
     // 切る前に植え直す場所を保存して、中断しても忘れないようにする
     const spots = tree.base.map(({ x, y, z }) => ({ x, y, z, name: `${tree.type}_sapling` }))
     const fresh = spots.filter((s) => !result.pending.some((p) => p.x === s.x && p.y === s.y && p.z === s.z))

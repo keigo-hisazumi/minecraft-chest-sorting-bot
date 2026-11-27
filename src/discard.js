@@ -7,6 +7,7 @@ const path = require('node:path')
 const { goals } = require('mineflayer-pathfinder')
 const { findThrowSite, leftovers, tossIntoCactus } = require('./cactus')
 const { formatPosition } = require('./chests')
+const { message } = require('./messages')
 const { describeItem } = require('./items')
 const { hasRoom, evictableStacks } = require('./moves')
 const { storeStack } = require('./store')
@@ -105,7 +106,7 @@ async function discardHeld(context, state) {
     signal.throwIfAborted()
     const targets = await confirmFull(context, layout.dedicated.get(name), name)
     if (!targets || targets.length === 0) continue
-    notify(`廃棄します: ${name} ${total(targets)} 個`)
+    notify(message.start('廃棄', `${name} ${total(targets)} 個`))
     for (const target of targets) {
       signal.throwIfAborted()
       // 投げる直前にも、同じアイテムで保護対象でないことを確かめる
@@ -122,7 +123,7 @@ async function discardHeld(context, state) {
         record(logFile, RESULT_LABELS[outcome], name, target.count)
       }
       if (outcome === 'unreachable') {
-        result.problem = 'サボテンの近くへ行けないため、廃棄できません'
+        result.problem = message.failed('廃棄', 'サボテンの近くへ行けません')
         return attempts
       }
       attempts++
@@ -135,11 +136,11 @@ async function discardHeld(context, state) {
       state.failures++
       const left = await pickUp(context, name, site.cactus)
       if (left.length > 0) {
-        result.problem = `投げた ${name} が (${formatPosition(left[0].position.floored())}) に残っているため、廃棄をやめました`
+        result.problem = message.stopped('廃棄', `投げた ${name} が ${formatPosition(left[0].position.floored())} に残っています`)
         return attempts
       }
       if (state.failures >= MAX_FAILURES) {
-        result.problem = `廃棄を ${MAX_FAILURES} 回続けて確認できないため、やめました`
+        result.problem = message.stopped('廃棄', `${MAX_FAILURES} 回続けて消えたことを確認できません`)
         return attempts
       }
       // 拾い直した分は、次の回でもう一度確かめてから投げる

@@ -63,7 +63,7 @@ test('伐採する前に通知し、原木だけを切って、植え直さず�
     }
   })
   assert.deepEqual(events, [
-    '伐採します: オーク (0 64 0)',
+    '伐採します: オーク (0, 64, 0)',
     'dig oak_log 64',
     'dig oak_log 65',
     'dig oak_log 66',
