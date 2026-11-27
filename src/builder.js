@@ -243,8 +243,7 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
       if (gathered.trees > 0) result.changed = true
       if (gathered.barehanded) result.notes.push('斧を用意できない間は、素手で伐採しました')
       if (gathered.exhausted) {
-        const tall = gathered.tall > 0 ? `大きすぎる木 ${gathered.tall} 本は切りません` : null
-        result.problems.push(message.failed('伐採', '範囲内に切れる木がありません', tall))
+        result.problems.push(message.failed('伐採', '範囲内に切れる木がありません'))
       }
     }
   }

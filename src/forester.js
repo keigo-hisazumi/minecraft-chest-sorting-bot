@@ -7,25 +7,14 @@ const { VERTICAL_RANGE, isInRange, formatPosition } = require('./chests')
 const { message } = require('./messages')
 const { countPlanks, plankValue, planksPerLog, isPlank, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
 const { createMovements } = require('./navigation')
-const { MAX_HEIGHT, TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves, isPlacedLeaves } = require('./trees')
-const { cutFromTrunk, findPillarSpot } = require('./climb')
+const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves, isPlacedLeaves } = require('./trees')
+const { MAX_CLIMB } = require('./climb')
+const { fellTree: fellTree_, digAt, PICKUP, DIG_REACH } = require('./felling')
 const { toVec3, toChest, cargoStacks, emptyCargoSlots, refresh, moveStack, hold, release, hotbarSlots, withChest } = require('./window')
 
 const AXES = ['stone_axe', 'wooden_axe']
-// 手が届く距離（ブロック）
-const DIG_REACH = 4
-// 落ちたアイテムを拾いに行く、根元からの距離（ブロック）
-const COLLECT_DISTANCE = 8
-// 落ちたアイテムが拾えるようになるのを待つ時間（tick）
-const DROP_WAIT_TICKS = 20
 // 1 回の呼び出しで伐採する木の数の上限
 const TREE_LIMIT = 40
-// 地上から切りに行く原木の、根元からの高さの上限。これより高い原木は、幹の跡に柱を積んで登って切る
-const GROUND_REACH = 5
-// 1 本の木で、柱を積んで登り直す回数の上限
-const MAX_CLIMB_ROUNDS = 8
-// 拾うアイテム
-const PICKUP = /(_log|_sapling|^stick|^apple)$/
 
 const isAxe = (stack) => AXES.includes(stack.name) && !stack.protected
 const heldValue = (bot) => cargoStacks(bot.inventory).reduce((total, s) => total + plankValue(s), 0)
@@ -53,22 +42,20 @@ function inArea(center, tree) {
   const flat = (p) => ({ x: p.x, y: center.y, z: p.z })
   if (!tree.logs.every((p) => isInRange(center, flat(p)))) return false
   // 切り残しは、根元より高い位置に浮いているため、木の高さの分まで上を許す
-  const above = tree.remnant ? VERTICAL_RANGE + MAX_HEIGHT : VERTICAL_RANGE
+  const above = tree.remnant ? VERTICAL_RANGE + MAX_CLIMB : VERTICAL_RANGE
   return base.y - center.y >= -VERTICAL_RANGE && base.y - center.y <= above
 }
 
 /**
  * 範囲内の木を調べる
  *
- * @returns {{ trees: object[], tall: number }} trees は伐採してよい木と切り残し（remnant が true。中心に近い順）、
- *   tall は大きすぎて切らない木の数
+ * @returns {{ trees: object[] }} trees は伐採してよい木と切り残し（remnant が true。中心に近い順）
  */
 function findTrees(bot, center) {
   const ids = LOG_NAMES.map((name) => bot.registry.blocksByName[name]?.id).filter((id) => id !== undefined)
   const found = bot.findBlocks({ matching: ids, point: toVec3(center), maxDistance: 48, count: 4000 })
   const seen = new Set()
   const trees = []
-  let tall = 0
   for (const position of found) {
     if (seen.has(position.toString())) continue
     let tree = analyzeTree((p) => bot.blockAt(p), position)
@@ -77,10 +64,9 @@ function findTrees(bot, center) {
     for (const log of tree.logs) seen.add(log.toString())
     if (!inArea(center, tree)) continue
     if (tree.ok) trees.push(tree)
-    else if (tree.reason === 'tall') tall++
   }
   const distance = (tree) => toVec3(center).distanceTo(tree.base[0])
-  return { trees: trees.sort((a, b) => distance(a) - distance(b)), tall }
+  return { trees: trees.sort((a, b) => distance(a) - distance(b)) }
 }
 
 // チェストから、条件に合うアイテムを必要な数になるまで取り出す（枠の単位）
@@ -159,50 +145,41 @@ async function makeAxe(context, records) {
   return holdAxe(bot)
 }
 
-// 手の届く場所へ移って、ブロックを壊す
-async function digAt(context, position, name, near) {
+// 共通の伐採処理（felling.js）に渡す、この BOT での移動・斧・持ち物の扱い
+function forestryOps(context, records) {
   const { bot, navigator, signal } = context
-  const target = () => bot.blockAt(position)
-  if (target()?.name !== name) return false
-  if (!bot.canDigBlock(target())) {
-    await navigator.moveTo(new goals.GoalLookAtBlock(position, bot.world, { reach: DIG_REACH }), createForestryMovements)
-    signal.throwIfAborted()
-    // 見える位置がなければ、根元に立って下から掘る
-    if (!bot.canDigBlock(target()) && near) {
-      await navigator.moveTo(new goals.GoalNear(near.x, near.y, near.z, 0), createForestryMovements)
-      signal.throwIfAborted()
-    }
+  const own = (tree) => (tree ? `${tree.type}_log` : null)
+  return {
+    bot,
+    moveTo: async (goal) => (await navigator.moveTo(goal, createForestryMovements)).status === 'arrived',
+    isCancelled: () => signal.aborted,
+    ensureAxe: () => ensureAxe(context, records),
+    holdAxe: () => holdAxe(bot),
+    holdBlock: async () => {
+      // 足場には原木を使う（同じ種類があれば優先する）
+      const names = context.tree ? [own(context.tree), ...LOG_NAMES.filter((n) => n !== own(context.tree))] : LOG_NAMES
+      for (const name of names) {
+        if (await hold(bot, name)) return true
+      }
+      return false
+    },
+    canPickUp: () => emptyCargoSlots(bot.inventory).length > 0,
+    notify: context.notify ?? (() => {})
   }
-  if (target()?.name !== name || !bot.canDigBlock(target())) return false
-  try {
-    await bot.dig(target(), true)
-  } catch (err) {
-    console.error(`${formatPosition(position)} を壊せませんでした:`, err.message)
-  }
-  signal.throwIfAborted()
-  return target()?.name !== name
 }
 
-// 落ちている原木や苗木を拾う
-async function collectDrops(context, center) {
-  const { bot, navigator, signal } = context
-  await bot.waitForTicks(DROP_WAIT_TICKS)
-  const tried = new Set()
-  for (;;) {
-    signal.throwIfAborted()
-    if (emptyCargoSlots(bot.inventory).length === 0) return
-    const drop = Object.values(bot.entities)
-      .filter((e) => e.name === 'item' && !tried.has(e.id) && e.position.distanceTo(center) <= COLLECT_DISTANCE)
-      .filter((e) => PICKUP.test(e.getDroppedItem()?.name ?? ''))
-      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
-    if (!drop) return
-    tried.add(drop.id)
-    const { x, y, z } = drop.position.floored()
-    await navigator.moveTo(new goals.GoalNear(x, y, z, 0), createForestryMovements)
-    signal.throwIfAborted()
-    await bot.waitForTicks(5)
+// 1 本の木を切り、落ちた原木と、落ちていれば苗木を拾う。切った原木の数を返す
+async function fellTree(context, tree, records) {
+  context.tree = tree
+  try {
+    const result = await fellTree_(forestryOps(context, records), tree)
+    if (result.barehanded) context.barehanded = true
+    return result.cut
+  } finally {
+    context.tree = null
   }
 }
+
 
 /**
  * 苗木を植え直す。指示された場合だけ呼び出す
@@ -230,7 +207,7 @@ async function replant(context, pending, records) {
       // すでに植わっているか、地面でなくなった場所は、植え直さない
       if (block.name === spot.name || !SOIL.has(floor.name)) continue
       if (isNaturalLeaves(block)) {
-        await digAt(context, cell, block.name)
+        await digAt(forestryOps(context, records), cell, block.name)
         block = bot.blockAt(cell)
       }
       if (block.boundingBox !== 'empty') continue
@@ -269,91 +246,6 @@ async function replant(context, pending, records) {
   return { planted, pending: rest }
 }
 
-/**
- * 指定した場所（幹の跡か、原木の真下の地面）に立ち、柱を積んで登って、地上から届かない原木を切る
- * 柱には持っている原木を使い、切り終えたら掘って降りる。
- *
- * @param {object} context
- * @param {object} tree 木（analyzeTree の結果）
- * @param {Array<object>} records チェストの中身（斧を作るときに使う）
- * @param {import('vec3').Vec3} spot 柱を積み始める場所
- * @returns {Promise<{ cut: number, reason: string | null }>} 切った原木の数と、原木を残してやめた理由
- */
-async function climbTree(context, tree, records, spot) {
-  const { bot, navigator, signal } = context
-  // 斧は、登る前に地上で用意する
-  if (!(await ensureAxe(context, records))) context.barehanded = true
-  const moved = await navigator.moveTo(new goals.GoalBlock(spot.x, spot.y, spot.z), createForestryMovements)
-  signal.throwIfAborted()
-  if (moved.status !== 'arrived') return { cut: 0, reason: `${formatPosition(spot)} へ行けません` }
-  let reason = null
-  const own = `${tree.type}_log`
-  const cut = await cutFromTrunk(bot, tree, {
-    dig: async (block) => {
-      // 柱の上にいる間は、斧を作りに作業台へ行かない（持っている斧だけを使う）。
-      // 中止されたあとも、積んだ柱は掘って降りるため、斧がなくても掘る
-      if (!(await holdAxe(bot).catch(() => false))) context.barehanded = true
-      await bot.dig(block, true)
-    },
-    holdBlock: async () => {
-      for (const name of [own, ...LOG_NAMES.filter((n) => n !== own)]) {
-        if (await hold(bot, name)) return true
-      }
-      return false
-    },
-    isCancelled: () => signal.aborted,
-    onStop: (text) => {
-      reason = text
-    }
-  })
-  signal.throwIfAborted()
-  return { cut, reason }
-}
-
-// 1 本の木を切り、落ちた原木と、落ちていれば苗木を拾う
-// 地上から届く高さの原木を先に切り、高い原木が残っていれば、幹の跡に柱を積んで登って切る。
-// それでも残った原木（横に張り出した枝など）は、原木の真下から柱を積んで切り、残さないようにする。
-async function fellTree(context, tree, records) {
-  const { bot } = context
-  const notify = context.notify ?? (() => {})
-  const [base] = tree.base
-  const name = `${tree.type}_log`
-  const left = () => tree.logs.filter((p) => bot.blockAt(p)?.name === name)
-  let cut = 0
-  // 切り残しは根元がないため、地上からは切らずに、真下から足場を積んで切る
-  if (!tree.remnant) {
-    for (const position of tree.logs.filter((p) => p.y - base.y <= GROUND_REACH)) {
-      // 斧が壊れたら作り直す。用意できなければ素手で掘る
-      if (!(await ensureAxe(context, records))) context.barehanded = true
-      if (await digAt(context, position, name, base)) cut++
-    }
-    if (cut === 0) return 0
-    await collectDrops(context, base)
-  }
-  // 柱を積み始めた場所。同じ場所からは、やり直さない
-  const tried = new Set()
-  let reason = null
-  for (let round = 0; round < MAX_CLIMB_ROUNDS && left().length > 0; round++) {
-    const remaining = left()
-    // はじめは幹の跡から。次からは、残った原木の低い順に、その真下から（切り残しは、はじめから真下から）
-    const starts = tree.remnant ? [] : [base]
-    const spot = [...starts, ...remaining.map((p) => findPillarSpot(bot, p))].find((p) => p && !tried.has(p.toString()))
-    if (!spot) {
-      reason ??= '柱を積める場所がありません'
-      break
-    }
-    tried.add(spot.toString())
-    const where = spot === base ? '幹に足場を積んで登ります' : `${formatPosition(spot)} から足場を積んで登ります`
-    notify(message.start('伐採', `高いところの原木 ${remaining.length} 個`, where))
-    const climbed = await climbTree(context, tree, records, spot)
-    cut += climbed.cut
-    if (climbed.reason) reason = climbed.reason
-    await collectDrops(context, spot)
-  }
-  const rest = left().length
-  if (rest > 0) notify(message.failed('伐採', `${TREE_LABELS[tree.type]} ${formatPosition(base)} の原木 ${rest} 個`, reason))
-  return cut
-}
 
 /**
  * 手持ちの木材が、板材に換算して必要な数になるまで伐採する
@@ -365,13 +257,13 @@ async function fellTree(context, tree, records) {
  * @param {number} [options.maxTrees] 切る木の本数の上限（既定は TREE_LIMIT。Infinity なら、切れる木がなくなるまで切る）
  * @param {Array<object>} options.pending 植え直していない場所
  * @param {(pending: Array<object>) => void} options.savePending 植え直していない場所を保存する関数
- * @returns {Promise<{ trees: number, remnants: number, logs: number, pending: object[], tall: number, exhausted: boolean, barehanded: boolean }>}
+ * @returns {Promise<{ trees: number, remnants: number, logs: number, pending: object[], exhausted: boolean, barehanded: boolean }>}
  *   remnants は切った切り残し（根元を切ったあとに上部が残った木）の数で、trees には含めない
  *   exhausted は、必要な数が揃う前に切れる木がなくなったことを表す
  */
 async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pending, savePending }) {
   const { bot, signal, notify } = context
-  const result = { trees: 0, remnants: 0, logs: 0, pending, tall: 0, exhausted: false, barehanded: false }
+  const result = { trees: 0, remnants: 0, logs: 0, pending, exhausted: false, barehanded: false }
   const skipped = new Set()
   // 伐採を始める前から空いている枠には、拾ったアイテムが入る
   const emptyBefore = new Set(hotbarSlots(bot.inventory).filter((slot) => !bot.inventory.slots[slot]))
@@ -379,7 +271,6 @@ async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pen
   while (heldValue(bot) < wanted && result.trees < maxTrees && emptyCargoSlots(bot.inventory).length > 1) {
     signal.throwIfAborted()
     const found = findTrees(bot, context.center)
-    result.tall = found.tall
     const tree = found.trees.find((t) => !skipped.has(t.base[0].toString()))
     if (!tree) {
       result.exhausted = true

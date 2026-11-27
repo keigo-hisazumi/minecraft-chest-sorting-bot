@@ -130,7 +130,7 @@ test('findPillarSpot: 原木の真下で、空気と葉を抜けた先の地面�
   }
   assert.deepEqual(findPillarSpot({ blockAt }, new Vec3(3, 70, 0)), new Vec3(3, 64, 0))
   // 地面が遠すぎれば見つからない
-  assert.equal(findPillarSpot({ blockAt }, new Vec3(3, 120, 0)), null)
+  assert.equal(findPillarSpot({ blockAt }, new Vec3(3, 500, 0)), null)
   // 水の上には立てない
   blocks.set('3,63,0', 'water')
   assert.equal(findPillarSpot({ blockAt }, new Vec3(3, 70, 0)), null)

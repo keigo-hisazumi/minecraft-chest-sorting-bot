@@ -65,7 +65,7 @@ function setup(t) {
     savePending([...pending, ...cut])
     // 本数を指定しなければ、2 本切ったところで切れる木がなくなったことにする
     const trees = count === Infinity ? 2 : count
-    return { trees, logs: trees * 4, tall: 0, exhausted: count === Infinity, barehanded: false, pending: [...pending, ...cut] }
+    return { trees, logs: trees * 4, exhausted: count === Infinity, barehanded: false, pending: [...pending, ...cut] }
   }
   const boot = () => {
     const created = new SortController(bot, new StateStore(file), 'localhost:25565', {
