@@ -87,6 +87,12 @@ test('斜めに繋がった建築物の原木があれば、全体を対象に�
   assert.equal(world.analyze().reason, 'built')
 })
 
-test('手が届かない高さの木は切らない', () => {
-  assert.equal(createWorld({ height: 8 }).analyze().reason, 'tall')
+test('地上から届かない高さの木も、登って切れる高さなら対象にする', () => {
+  const tree = createWorld({ height: 12 }).analyze()
+  assert.ok(tree.ok)
+  assert.equal(tree.logs.length, 12)
+})
+
+test('登っても切りきれない高さの木は切らない', () => {
+  assert.equal(createWorld({ height: 33 }).analyze().reason, 'tall')
 })

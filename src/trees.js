@@ -17,11 +17,11 @@ const TREE_LABELS = {
 const TREE_TYPES = Object.keys(TREE_LABELS)
 const LOG_NAMES = TREE_TYPES.map((type) => `${type}_log`)
 
-// 1 本の木とみなす原木の数の上限
-const MAX_LOGS = 32
-// 地上から全部の原木に手が届く、根元からの高さと水平の広がりの上限
-const MAX_HEIGHT = 5
-const MAX_SPREAD = 2
+// 1 本の木とみなす原木の数の上限（太いジャングルの木でも収まる数）
+const MAX_LOGS = 160
+// 切る木の、根元からの高さと水平の広がりの上限。地上から届かない高さは、幹の跡に柱を積んで登って切る（climb.js）
+const MAX_HEIGHT = 31
+const MAX_SPREAD = 4
 // 自然の木とみなすのに必要な、原木に接した葉の数
 const MIN_LEAVES = 4
 
@@ -90,7 +90,7 @@ function connectedLogs(blockAt, start, name) {
  * @param {(position: Vec3) => object | null} blockAt
  * @param {Vec3} start 原木の座標
  * @returns {{ ok: boolean, reason?: 'built' | 'tall', type: string, logs: Vec3[], base: Vec3[] }}
- *   logs は低い順。base は根元の原木。built は建築物の可能性、tall は手が届かない大きさ
+ *   logs は低い順。base は根元の原木。built は建築物の可能性、tall は登っても切りきれない大きさ
  */
 function analyzeTree(blockAt, start) {
   const name = blockAt(start).name

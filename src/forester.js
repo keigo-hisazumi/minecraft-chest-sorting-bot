@@ -7,6 +7,7 @@ const { isInRange, formatPosition } = require('./chests')
 const { countPlanks, plankValue, planksPerLog, isPlank, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
 const { createMovements } = require('./navigation')
 const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, isNaturalLeaves, isPlacedLeaves } = require('./trees')
+const { cutFromTrunk } = require('./climb')
 const { toVec3, toChest, cargoStacks, emptyCargoSlots, refresh, moveStack, hold, release, hotbarSlots, withChest } = require('./window')
 
 const AXES = ['stone_axe', 'wooden_axe']
@@ -18,6 +19,8 @@ const COLLECT_DISTANCE = 8
 const DROP_WAIT_TICKS = 20
 // 1 回の呼び出しで伐採する木の数の上限
 const TREE_LIMIT = 40
+// 地上から切りに行く原木の、根元からの高さの上限。これより高い原木は、幹の跡に柱を積んで登って切る
+const GROUND_REACH = 5
 // 拾うアイテム
 const PICKUP = /(_log|_sapling|^stick|^apple)$/
 
@@ -236,16 +239,54 @@ async function replant(context, pending, records) {
   return { planted, pending: rest }
 }
 
+/**
+ * 幹の跡（根元の原木を切った場所）に立ち、柱を積んで登って、地上から届かない原木を切る
+ * 柱には持っている原木を使い、切り終えたら掘って降りる。
+ *
+ * @returns {Promise<number>} 切った原木の数
+ */
+async function climbTree(context, tree, records) {
+  const { bot, navigator, signal } = context
+  const [base] = tree.base
+  const moved = await navigator.moveTo(new goals.GoalBlock(base.x, base.y, base.z), createForestryMovements)
+  signal.throwIfAborted()
+  if (moved.status !== 'arrived') return 0
+  const own = `${tree.type}_log`
+  const cut = await cutFromTrunk(bot, tree, {
+    dig: async (block) => {
+      // 中止されたあとも、積んだ柱は掘って降りるため、斧を用意できなくても掘る
+      const axe = await ensureAxe(context, records).catch(() => false)
+      if (!axe) context.barehanded = true
+      await bot.dig(block, true)
+    },
+    holdBlock: async () => {
+      for (const name of [own, ...LOG_NAMES.filter((n) => n !== own)]) {
+        if (await hold(bot, name)) return true
+      }
+      return false
+    },
+    isCancelled: () => signal.aborted
+  })
+  signal.throwIfAborted()
+  return cut
+}
+
 // 1 本の木を切り、落ちた原木と、落ちていれば苗木を拾う
+// 地上から届く高さの原木を先に切り、高い原木が残っていれば、登って切る
 async function fellTree(context, tree, records) {
   const { bot } = context
+  const [base] = tree.base
   let cut = 0
-  for (const position of tree.logs) {
+  for (const position of tree.logs.filter((p) => p.y - base.y <= GROUND_REACH)) {
     // 斧が壊れたら作り直す。用意できなければ素手で掘る
     if (!(await ensureAxe(context, records))) context.barehanded = true
-    if (await digAt(context, position, `${tree.type}_log`, tree.base[0])) cut++
+    if (await digAt(context, position, `${tree.type}_log`, base)) cut++
   }
-  if (cut > 0) await collectDrops(context, tree.base[0])
+  if (cut > 0) await collectDrops(context, base)
+  if (cut > 0 && tree.logs.some((p) => bot.blockAt(p)?.name === `${tree.type}_log`)) {
+    cut += await climbTree(context, tree, records)
+    await collectDrops(context, base)
+  }
   return cut
 }
 
