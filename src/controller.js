@@ -27,7 +27,7 @@ const POLL_INTERVAL_MS = 30000
 const RETRY_POLLS = 10
 
 /**
- * BOT の周りの木を、指定した本数だけ切る（sort fell の既定の処理）
+ * 指示を受けた場所を中心に、近い木から指定した本数だけ切る（sort fell の既定の処理）。count が Infinity なら本数の上限を設けない
  * 原木の量の目標は設けず、本数に達するか、切れる木がなくなるか、持ち物の空きがなくなるまで切る。
  * 斧は持ち物の物を使う。なければ、範囲内に作業台があれば作り、作れなければ素手で切る。
  */
@@ -390,18 +390,23 @@ class SortController {
     }
   }
 
-  // BOT の周りの木を、指定した本数だけ切る。結果は、終わり次第 report で知らせる
-  fell(count) {
-    if (!Number.isInteger(count) || count < 1 || count > TREE_LIMIT) return [`本数は 1 から ${TREE_LIMIT} で指定してください`]
+  // 指示を受けた場所を中心に、近い木から指定した本数だけ切る。本数がなければ、切れる木がなくなるか止めるまで切る。
+  // 結果は、終わり次第 report で知らせる
+  fell(count = null) {
+    if (count !== null && (!Number.isInteger(count) || count < 1 || count > TREE_LIMIT)) {
+      return [`本数は 1 から ${TREE_LIMIT} で指定してください（省略すると、止めるまで切り続けます）`]
+    }
     const key = this.worldKey
     const world = this.store.get(key)
     this.navigator.cancel()
     const task = { type: 'fell', abort: new AbortController(), busy: true }
     this.task = task
-    task.done = this.runFell(key, world, count, task.abort.signal).finally(() => {
+    task.done = this.runFell(key, world, count ?? Infinity, task.abort.signal).finally(() => {
       this.task = null
     })
-    return [message.start('伐採', `周りの木 ${count} 本`, '中止するには sort stop と発言してください')]
+    const center = formatPosition(this.bot.entity.position.floored())
+    const target = count === null ? `${center} の周りの木（本数の指定なし）` : `${center} の周りの木 ${count} 本`
+    return [message.start('伐採', target, '近い木から切ります。中止するには sort stop と発言してください')]
   }
 
   async runFell(key, world, count, signal) {
@@ -417,13 +422,13 @@ class SortController {
         savePending: (spots) => this.saveReplant(key, spots)
       })
       const lines = [
-        result.trees < count
+        result.trees < count && !(count === Infinity && result.exhausted)
           ? message.stopped(
               '伐採',
               result.exhausted ? '周りに切れる木が残っていません' : '持ち物の空きがなくなりました',
               `切ったのは ${result.trees} 本、原木 ${result.logs} 個`
             )
-          : message.done('伐採', `${result.trees} 本`, `原木 ${result.logs} 個`)
+          : message.done('伐採', `${result.trees} 本`, `原木 ${result.logs} 個${count === Infinity ? '。周りに切れる木がなくなりました' : ''}`)
       ]
       if (result.tall > 0) lines.push(`大きすぎて切らなかった木: ${result.tall} 本`)
       if (result.barehanded) lines.push('斧を用意できなかったため、素手で切りました')

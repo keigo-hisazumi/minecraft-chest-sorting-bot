@@ -152,7 +152,7 @@ async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => fal
       // 手が届かないので、1 段登る。頭の上をふさぐ原木と自然の葉は掘る
       const feet = bot.entity.position.floored()
       const top = Math.max(...left.map((p) => p.y))
-      const stop = (reason) => onStop(`${reason}（残り ${left.length} 個）`)
+      const stop = (reason) => onStop(reason)
       if (feet.y >= top) {
         stop('幹から手が届かない位置にあります')
         break
@@ -191,4 +191,25 @@ async function cutFromTrunk(bot, tree, { dig, holdBlock, isCancelled = () => fal
   return cut
 }
 
-module.exports = { MAX_CLIMB, centerOnBlock, towerUp, descend, cutFromTrunk }
+/**
+ * 原木の真下の地面で、柱を積み始める場所を探す
+ * 幹から手が届かない原木（横に張り出した枝など）は、真下から柱を積んで切る。
+ * 原木から下へたどり、空気と自然の葉を抜けた先の最初のブロックの上を返す。
+ *
+ * @param {import('mineflayer').Bot} bot
+ * @param {import('vec3').Vec3} position 切りたい原木の座標
+ * @returns {import('vec3').Vec3 | null} 柱を積み始める場所（立つ場所）。地面が遠すぎるか、見つからなければ null
+ */
+function findPillarSpot(bot, position) {
+  for (let y = position.y - 1; y >= position.y - MAX_CLIMB; y--) {
+    const block = bot.blockAt(new Vec3(position.x, y, position.z))
+    if (!block) return null
+    if (isAir(block) || isNaturalLeaves(block)) continue
+    // 液体の上には立てない
+    if (block.name === 'water' || block.name === 'lava') return null
+    return new Vec3(position.x, y + 1, position.z)
+  }
+  return null
+}
+
+module.exports = { MAX_CLIMB, centerOnBlock, towerUp, descend, cutFromTrunk, findPillarSpot }

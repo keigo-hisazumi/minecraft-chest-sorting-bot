@@ -63,7 +63,9 @@ function setup(t) {
     fells.push({ context, count })
     const cut = [{ x: 3, y: 64, z: 0, name: 'oak_sapling' }]
     savePending([...pending, ...cut])
-    return { trees: count, logs: count * 4, tall: 0, exhausted: false, barehanded: false, pending: [...pending, ...cut] }
+    // 本数を指定しなければ、2 本切ったところで切れる木がなくなったことにする
+    const trees = count === Infinity ? 2 : count
+    return { trees, logs: trees * 4, tall: 0, exhausted: count === Infinity, barehanded: false, pending: [...pending, ...cut] }
   }
   const boot = () => {
     const created = new SortController(bot, new StateStore(file), 'localhost:25565', {
@@ -398,13 +400,21 @@ test('登録はディメンションごとに分ける', (t) => {
 
 test('指示した本数だけ伐採し、切った場所を植え直し用に記録する', async (t) => {
   const { run, controller, state, reports, fells } = setup(t)
-  assert.match(run('sort fell 3'), /伐採します: 周りの木 3 本/)
+  assert.match(run('sort fell 3'), /伐採します: \(0, 64, 0\) の周りの木 3 本（近い木から切ります/)
   assert.match(run('sort start'), /伐採中です/)
   await controller.task.done
   assert.equal(fells[0].count, 3)
   assert.deepEqual(state().replant, [{ x: 3, y: 64, z: 0, name: 'oak_sapling' }])
   assert.ok(reports.includes('伐採しました: 3 本（原木 12 個）'))
   assert.ok(reports.some((m) => m.includes('sort replant')))
+})
+
+test('本数を指定しなければ、切れる木がなくなるまで切る', async (t) => {
+  const { run, controller, reports, fells } = setup(t)
+  assert.match(run('sort fell'), /伐採します: \(0, 64, 0\) の周りの木（本数の指定なし）/)
+  await controller.task.done
+  assert.equal(fells[0].count, Infinity)
+  assert.ok(reports.includes('伐採しました: 2 本（原木 8 個。周りに切れる木がなくなりました）'), reports.join('\n'))
 })
 
 test('伐採の本数は 1 から上限まで', (t) => {
