@@ -5,7 +5,7 @@ const { gatherWood } = require('./forester')
 
 // 斧を持った BOT と、自然のオークが 1 本だけある世界。掘ったブロックは空気になる
 // bottom を上げると、根元を切ったあとに宙に残った上部（切り残し）になる
-function setup({ bottom = 64 } = {}) {
+function setup({ bottom = 64, axe = true } = {}) {
   const blocks = new Map()
   const put = (x, y, z, name) => blocks.set(new Vec3(x, y, z).toString(), name)
   const top = bottom + 3
@@ -21,7 +21,7 @@ function setup({ bottom = 64 } = {}) {
   const logs = [0, 1, 2, 3].map((dy) => new Vec3(0, bottom + dy, 0))
   const events = []
   const slots = []
-  slots[36] = { name: 'wooden_axe', count: 1, stackSize: 1 }
+  if (axe) slots[36] = { name: 'wooden_axe', count: 1, stackSize: 1 }
   const bot = {
     entity: { position: new Vec3(2.5, 64, 0.5) },
     entities: {},
@@ -95,4 +95,19 @@ test('根元を切ったあとに宙に残った上部も切り、木の本数�
   assert.equal(result.logs, 4)
   // 植え直す場所は増やさない
   assert.deepEqual(saved, [])
+})
+
+test('斧を用意できなければ、同じ作業の間は木を切るたびに作り直そうとしない', async () => {
+  const { context, events } = setup({ axe: false })
+  let tableLookups = 0
+  context.getTable = async () => {
+    tableLookups++
+    return null
+  }
+  const result = await gatherWood(context, { wanted: 16, records: [], pending: [], savePending: () => {} })
+  assert.equal(result.logs, 4)
+  assert.equal(result.barehanded, true)
+  // 作れるかを確かめるのは、はじめの 1 回だけ
+  assert.equal(tableLookups, 1)
+  assert.ok(events.every((e) => !e.startsWith('クラフト')))
 })

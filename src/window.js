@@ -123,9 +123,11 @@ async function hold(bot, name) {
   let target = slots.find((slot) => inventory.slots[slot]?.name === name)
   if (target === undefined) {
     const item = cargoStacks(inventory).find((s) => s.name === name)
-    target = slots.find((slot) => !inventory.slots[slot])
-    if (!item || target === undefined) return false
+    if (!item) return false
+    // ホットバーに空きがなければ、選んでいる枠の物と入れ替える（入れ替えた物は荷物の枠へ移る）
+    target = slots.find((slot) => !inventory.slots[slot]) ?? slots[bot.quickBarSlot ?? 0]
     await moveStack(bot, inventory, item.slot, target)
+    if (inventory.slots[target]?.name !== name) return false
   }
   bot.setQuickBarSlot(target - slots[0])
   return true
