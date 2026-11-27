@@ -1,28 +1,49 @@
 // 登録情報の保存
-// ワールド（接続先とディメンション）ごとに、指定チェスト、除外したチェスト、開始の状態をファイルへ残し、
+// ワールド（接続先とディメンション）ごとに、指定チェスト、除外したチェスト、開始の状態、振り分け先をファイルへ残し、
 // BOT を再起動しても引き継げるようにする。
 
 const fs = require('node:fs')
 const path = require('node:path')
 
-const FORMAT_VERSION = 1
+// 2: 振り分け先を追加。開始の状態でアイテムを動かすようになった
+const FORMAT_VERSION = 2
+
+/**
+ * 何も割り当てていない振り分け先を作る
+ *
+ * @returns {{ dedicated: Record<string, Array<object> | null>, mixed: Array<Array<object>>, protected: Array<Array<object>> }}
+ *   dedicated は、専用にするアイテム名と、そのチェストの座標（まだないものは null）
+ */
+function emptyAssignments() {
+  return { dedicated: {}, mixed: [], protected: [] }
+}
 
 /**
  * 何も登録していないワールドの状態を作る
  *
- * @returns {{ source: null, excluded: Array<Array<{ x: number, y: number, z: number }>>, running: boolean }}
+ * @returns {{ source: null, excluded: Array<Array<{ x: number, y: number, z: number }>>, running: boolean, assignments: object }}
  */
 function emptyWorld() {
-  return { source: null, excluded: [], running: false }
+  return { source: null, excluded: [], running: false, assignments: emptyAssignments() }
 }
 
 const isPosition = (p) => Number.isInteger(p?.x) && Number.isInteger(p?.y) && Number.isInteger(p?.z)
 const isPositions = (list) => Array.isArray(list) && list.length > 0 && list.every(isPosition)
+const isPositionsList = (list) => Array.isArray(list) && list.every(isPositions)
+const isAssignments = (a) =>
+  typeof a?.dedicated === 'object' &&
+  a.dedicated !== null &&
+  Object.values(a.dedicated).every((positions) => positions === null || isPositions(positions)) &&
+  isPositionsList(a.mixed) &&
+  isPositionsList(a.protected)
 const isWorld = (w) =>
   (w?.source === null || (isPositions(w?.source?.positions) && typeof w.source.auto === 'boolean')) &&
-  Array.isArray(w.excluded) &&
-  w.excluded.every(isPositions) &&
-  typeof w.running === 'boolean'
+  isPositionsList(w.excluded) &&
+  typeof w.running === 'boolean' &&
+  isAssignments(w.assignments)
+
+// 版 1 の開始の状態は、アイテムを動かさなかったときの指示のため、引き継がずに停止にする
+const upgradeFromVersion1 = (world) => ({ ...world, running: false, assignments: emptyAssignments() })
 
 /**
  * 登録情報を扱うクラス
@@ -44,7 +65,7 @@ class StateStore {
    * ワールドの状態の複製を返す
    *
    * @param {string} key ワールドの識別子（接続先とディメンション）
-   * @returns {ReturnType<typeof emptyWorld> | { source: { positions: Array<object>, auto: boolean }, excluded: Array<Array<object>>, running: boolean }}
+   * @returns {ReturnType<typeof emptyWorld>} source は、登録していれば { positions, auto }
    */
   get(key) {
     return structuredClone(this.worlds[key] ?? emptyWorld())
@@ -81,10 +102,12 @@ function load(file) {
   } catch (err) {
     throw new Error(`登録情報が壊れています（${file}）: ${err.message}`)
   }
-  if (data?.version !== FORMAT_VERSION || typeof data.worlds !== 'object' || data.worlds === null || !Object.values(data.worlds).every(isWorld)) {
-    throw new Error(`登録情報の形式が正しくありません（${file}）`)
-  }
-  return data.worlds
+  const invalid = new Error(`登録情報の形式が正しくありません（${file}）`)
+  if (![1, FORMAT_VERSION].includes(data?.version) || typeof data.worlds !== 'object' || data.worlds === null) throw invalid
+  const entries = Object.entries(data.worlds)
+  const worlds = Object.fromEntries(data.version === 1 ? entries.map(([key, world]) => [key, upgradeFromVersion1(world)]) : entries)
+  if (!Object.values(worlds).every(isWorld)) throw invalid
+  return worlds
 }
 
-module.exports = { StateStore, emptyWorld }
+module.exports = { StateStore, emptyWorld, emptyAssignments }

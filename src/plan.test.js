@@ -105,6 +105,36 @@ test('合計が多いアイテムより、そのチェストに多く入って�
   assert.deepEqual(byName, { stone: 20, sand: 10 })
 })
 
+const positionsAt = (x) => large(x).positions
+
+test('一度専用にしたアイテムは、少なくなっても同じチェストを専用にする', () => {
+  const previous = { dedicated: { stone: positionsAt(20), sand: positionsAt(30) }, mixed: [], protected: [] }
+  const plan = buildPlan({ source: single(0, [stack('stone', 1)]), chests: [large(10, stacks('stone', 2)), large(20), large(30)] }, { previous })
+  assert.deepEqual(
+    plan.dedicated.map((d) => [d.name, chestX(d.chest)]),
+    [
+      ['stone', 20],
+      ['sand', 30]
+    ]
+  )
+  assert.deepEqual(plan.mixed.items, [])
+})
+
+test('前回の混合チェストを引き継ぐ', () => {
+  const previous = { dedicated: {}, mixed: [positionsAt(30)], protected: [] }
+  const plan = buildPlan({ source: single(0, [stack('stick', 1)]), chests: [large(10, [stack('torch', 1)]), large(30)] }, { previous })
+  assert.deepEqual(plan.mixed.chests.map(chestX), [30])
+})
+
+test('専用にできないチェストと、実際の枠の数を指定できる', () => {
+  const options = { canDedicate: (c) => c.positions.length === 2, capacity: (c) => 27 * c.positions.length }
+  const items = [...stacks('stone', 3), ...Array.from({ length: 40 }, (v, i) => stack(`item${i}`, 1))]
+  const plan = buildPlan({ source: single(0, items), chests: [single(10, stacks('stone', 5)), single(20)] }, options)
+  assert.equal(plan.dedicated[0].chest, null)
+  // 40 枠は、単体チェスト 2 つ（54 枠）に入る
+  assert.deepEqual(plan.mixed.chests.map(chestX).sort(), [10, 20])
+})
+
 test('整理先の単体チェストは大きなチェストに広げる。指定チェストは広げない', () => {
   const plan = buildPlan({ source: single(0, stacks('stone', 3)), chests: [single(10), large(20)] })
   assert.deepEqual(plan.expansions, [[{ x: 10, y: 64, z: 0 }]])

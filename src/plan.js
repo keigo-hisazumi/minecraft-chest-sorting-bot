@@ -1,6 +1,9 @@
 // 振り分けの計画
 // チェストの中身から、どのアイテムをどのチェストへ入れるかを決める。アイテムは動かさない。
 
+const { overlaps } = require('./chests')
+const { emptyAssignments } = require('./state')
+
 // 大きなチェストの枠の数
 const LARGE_CHEST_SLOTS = 54
 // 専用チェストを作る個数（最大スタック数の倍数）
@@ -53,50 +56,69 @@ function fillDedicated(variants) {
 }
 
 /**
- * 整理先のチェストを、専用、混合、保護対象の順に割り当てる
- * 足りない分は null（新しく作る）にする。移す量が少なくなるように、そのアイテムが多いチェストを優先する。
+ * 整理先のチェストを、専用、混合、保護対象に割り当てる
+ * 前回の割り当てを引き継ぎ、残りは専用、混合、保護対象の順に決める。足りない分は null（新しく作る）にする。
+ * 移す量が少なくなるように、そのアイテムが多いチェストを優先する。
  *
  * @param {Array<{ positions: Array<object>, items: Array<object> }>} chests 整理先のチェスト
- * @param {string[]} dedicatedNames 専用チェストを作るアイテム（優先する順）
- * @param {number} mixedCount 混合チェストの数
- * @param {number} protectedCount 保護対象チェストの数
+ * @param {object} request
+ * @param {string[]} request.dedicatedNames 専用チェストを作るアイテム（優先する順）
+ * @param {number} request.mixedSlots 混合チェストに必要な枠の数
+ * @param {number} request.protectedSlots 保護対象チェストに必要な枠の数
+ * @param {object} options buildPlan の options
  */
-function assignChests(chests, dedicatedNames, mixedCount, protectedCount) {
+function assignChests(chests, { dedicatedNames, mixedSlots, protectedSlots }, { previous, canDedicate, capacity }) {
   const free = new Set(chests)
   const countOf = (chest, name) => sum(chest.items.filter((i) => i.name === name).map((i) => i.count))
   // 大きなチェストを先に、中身が少ない順に使う
   const byEase = (a, b) => b.positions.length - a.positions.length || a.items.length - b.items.length
-  const take = (compare, filter = () => true) => {
-    const chosen = [...free].filter(filter).sort(compare)[0] ?? null
-    if (chosen) free.delete(chosen)
-    return chosen
+  const use = (chest) => {
+    free.delete(chest)
+    return chest
   }
+  const take = (compare, filter = () => true) => {
+    const chosen = [...free].filter(filter).sort(compare)[0]
+    return chosen ? use(chosen) : null
+  }
+  // 前回と同じ場所のチェスト（大きなチェストに広げられていても一致する）
+  const takeAt = (positions, filter) => (positions ? take(byEase, (c) => overlaps(c.positions, positions) && filter(c)) : null)
 
   const dedicated = new Map(dedicatedNames.map((name) => [name, null]))
-  // まず、アイテムがすでに入っているチェストを、入っている数が多い組み合わせから割り当てる
+  for (const name of dedicatedNames) dedicated.set(name, takeAt(previous.dedicated[name], canDedicate))
+  const keep = (list) => list.map((positions) => takeAt(positions, () => true)).filter(Boolean)
+  const mixed = mixedSlots > 0 ? keep(previous.mixed) : []
+  const protectedChests = protectedSlots > 0 ? keep(previous.protected) : []
+
+  // アイテムがすでに入っているチェストを、入っている数が多い組み合わせから割り当てる
   const holdings = dedicatedNames
     .flatMap((name) => chests.map((chest) => ({ name, chest, count: countOf(chest, name) })))
-    .filter((holding) => holding.count > 0)
+    .filter((holding) => holding.count > 0 && canDedicate(holding.chest))
     .sort((a, b) => b.count - a.count || byEase(a.chest, b.chest))
   for (const { name, chest } of holdings) {
-    if (dedicated.get(name) || !free.has(chest)) continue
-    dedicated.set(name, chest)
-    free.delete(chest)
+    if (!dedicated.get(name) && free.has(chest)) dedicated.set(name, use(chest))
   }
   for (const name of dedicatedNames) {
-    if (!dedicated.get(name)) dedicated.set(name, take(byEase))
+    if (!dedicated.get(name)) dedicated.set(name, take(byEase, canDedicate))
   }
 
+  // 枠が足りるまでチェストを増やし、足りない分は新しいチェストの数だけ null を足す
+  const fill = (list, slots, compare) => {
+    let rest = slots - sum(list.map(capacity))
+    while (rest > 0) {
+      const chest = take(compare)
+      if (!chest) break
+      list.push(chest)
+      rest -= capacity(chest)
+    }
+    return [...list, ...Array(Math.max(0, Math.ceil(rest / LARGE_CHEST_SLOTS))).fill(null)]
+  }
   const isDedicated = new Set(dedicatedNames)
   const mixedItems = (chest) => chest.items.filter((i) => !isDedicated.has(i.name)).length
-  const mixed = Array.from({ length: mixedCount }, () => take((a, b) => mixedItems(b) - mixedItems(a) || byEase(a, b)))
-  const protectedChests = Array.from({ length: protectedCount }, () => take(byEase))
-
   const positions = (chest) => chest?.positions ?? null
   return {
     dedicated: new Map([...dedicated].map(([name, chest]) => [name, positions(chest)])),
-    mixed: mixed.map(positions),
-    protected: protectedChests.map(positions)
+    mixed: fill(mixed, mixedSlots, (a, b) => mixedItems(b) - mixedItems(a) || byEase(a, b)).map(positions),
+    protected: fill(protectedChests, protectedSlots, byEase).map(positions)
   }
 }
 
@@ -106,11 +128,19 @@ function assignChests(chests, dedicatedNames, mixedCount, protectedCount) {
  * @param {object} survey
  * @param {{ positions: Array<object>, items: Array<object> }} survey.source 指定チェストの中身
  * @param {Array<{ positions: Array<object>, items: Array<object> }>} survey.chests 整理先のチェストの中身
+ * @param {object} [options]
+ * @param {{ dedicated: object, mixed: Array, protected: Array }} [options.previous] 前回の割り当て
+ * @param {(chest: object) => boolean} [options.canDedicate] 専用チェストにできるか（既定は、広げる前提ですべて可）
+ * @param {(chest: object) => number} [options.capacity] チェストの枠の数（既定は、広げる前提で大きなチェストの枠の数）
  * @returns {object} 計画
  */
-function buildPlan({ source, chests }) {
+function buildPlan({ source, chests }, { previous = emptyAssignments(), canDedicate = () => true, capacity = () => LARGE_CHEST_SLOTS } = {}) {
   const totals = totalItems([source, ...chests]).sort((a, b) => b.total - a.total || compareText(a.name, b.name))
-  const isDedicated = (entry) => entry.total >= THRESHOLD_STACKS * entry.stackSize
+  // 一度専用チェストを作ったアイテムは、少なくなっても（なくなっても）専用のままにする
+  for (const name of Object.keys(previous.dedicated)) {
+    if (!totals.some((entry) => entry.name === name)) totals.push({ name, total: 0, stackSize: 1, variants: new Map() })
+  }
+  const isDedicated = (entry) => Object.hasOwn(previous.dedicated, entry.name) || entry.total >= THRESHOLD_STACKS * entry.stackSize
   const dedicatedEntries = totals.filter(isDedicated)
   const mixedEntries = totals.filter((entry) => !isDedicated(entry)).sort((a, b) => compareText(a.name, b.name))
 
@@ -120,9 +150,8 @@ function buildPlan({ source, chests }) {
 
   const assigned = assignChests(
     chests,
-    dedicatedEntries.map((e) => e.name),
-    Math.ceil(mixedSlots / LARGE_CHEST_SLOTS),
-    Math.ceil(protectedSlots / LARGE_CHEST_SLOTS)
+    { dedicatedNames: dedicatedEntries.map((e) => e.name), mixedSlots, protectedSlots },
+    { previous, canDedicate, capacity }
   )
 
   const dedicated = filled.map(({ entry, discard, overflow }) => ({

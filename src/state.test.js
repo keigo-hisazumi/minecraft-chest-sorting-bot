@@ -11,7 +11,20 @@ function temporaryFile(t) {
   return path.join(dir, 'data', 'state.json')
 }
 
-const world = { source: { positions: [{ x: 1, y: 2, z: 3 }], auto: false }, excluded: [[{ x: 4, y: 5, z: 6 }]], running: true }
+const world = {
+  source: { positions: [{ x: 1, y: 2, z: 3 }], auto: false },
+  excluded: [[{ x: 4, y: 5, z: 6 }]],
+  running: true,
+  assignments: { dedicated: { stone: [{ x: 7, y: 8, z: 9 }] }, mixed: [[{ x: 1, y: 1, z: 1 }]], protected: [] }
+}
+
+test('版 1 の登録は引き継ぎ、開始の状態だけを停止にする', (t) => {
+  const file = temporaryFile(t)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const { assignments, ...old } = world
+  fs.writeFileSync(file, JSON.stringify({ version: 1, worlds: { a: old } }))
+  assert.deepEqual(new StateStore(file).get('a'), { ...old, running: false, assignments: emptyWorld().assignments })
+})
 
 test('保存ファイルがなければ、登録なしから始める', (t) => {
   assert.deepEqual(new StateStore(temporaryFile(t)).get('a'), emptyWorld())

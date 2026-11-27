@@ -72,4 +72,23 @@ function formatDetail(plan, failed) {
   ].join('\n')
 }
 
-module.exports = { formatSummary, formatDetail }
+/**
+ * 整理の結果を、チャットで知らせる文にする
+ *
+ * @param {object} result sortOnce の結果
+ * @returns {string[]} 発言する文
+ */
+function formatResult(result) {
+  const lines = [result.delivered > 0 ? `整理しました: ${result.delivered} 個を移しました` : '移せるアイテムはありません']
+  if (result.shortage.length > 0) lines.push(`専用にする大きなチェストが足りないため残しています: ${shorten(result.shortage)}`)
+  if (result.missingChests > 0) lines.push(`混合または保護対象のチェストが ${result.missingChests} 個足りません`)
+  if (result.sourceItems > 0) lines.push(`指定チェストに ${result.sourceItems} 個残っています`)
+  if (result.misplaced > 0) lines.push(`整理先に、移しきれないアイテムが ${result.misplaced} 枠あります`)
+  if (result.carried > 0) lines.push(`BOT が ${result.carried} 個持ったままです`)
+  if (result.failed.length > 0) {
+    lines.push(`使えなかったチェスト: ${shorten(result.failed.map((f) => `${formatPosition(f.positions[0])} ${f.reason}`))}`)
+  }
+  return lines
+}
+
+module.exports = { formatSummary, formatDetail, formatResult }
