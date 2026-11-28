@@ -1,4 +1,4 @@
-// コマンドの実行（チェストの登録・除外、整理の開始と停止、調査と計画の表示、伐採、植え直し、呼び寄せと現在位置の報告）
+// コマンドの実行（チェストの登録・除外、整理の開始と停止、調査と計画の表示、伐採、呼び寄せと現在位置の報告）
 // 整理を開始している間は、指定チェストを定期的に確認して、中身が変わったら整理する。
 
 const fs = require('node:fs')
@@ -9,18 +9,18 @@ const { CHEST_NAME, chestPositions, findNearestChest, sortPositions, formatChest
 const { HELP } = require('./commands')
 const { formatPosition, message } = require('./messages')
 const { findTable } = require('./builder')
-const { TREE_LIMIT, gatherWood, replant } = require('./forester')
+const { TREE_LIMIT, gatherWood } = require('./forester')
 const { buildPlan } = require('./plan')
 const { formatSummary, formatDetail, formatResult } = require('./planreport')
 const { sortOnce, readSourceSignature } = require('./sorter')
 const { surveyChests } = require('./survey')
 
 // 調査やアイテムの移動をしている間は受け付けないコマンド（移動や登録内容が食い違うため）
-const BLOCKED_WHILE_BUSY = new Set(['start', 'plan', 'replant', 'fell', 'chest', 'exclude', 'come'])
+const BLOCKED_WHILE_BUSY = new Set(['start', 'plan', 'fell', 'chest', 'exclude', 'come'])
 // 整理を開始している間は、次の確認を待っているときも受け付けないコマンド
-const BLOCKED_WHILE_SORTING = new Set(['start', 'plan', 'replant', 'fell'])
+const BLOCKED_WHILE_SORTING = new Set(['start', 'plan', 'fell'])
 // 実行中の作業の呼び方
-const TASK_NAMES = { sort: '整理', plan: '調査', replant: '植え直し', fell: '伐採' }
+const TASK_NAMES = { sort: '整理', plan: '調査', fell: '伐採' }
 // 指定チェストを確認する間隔（ミリ秒）
 const POLL_INTERVAL_MS = 30000
 // 使えないチェストがあった場合に、中身が変わらなくても整理をやり直すまでの確認の回数
@@ -31,8 +31,8 @@ const RETRY_POLLS = 10
  * 原木の量の目標は設けず、本数に達するか、切れる木がなくなるか、持ち物の空きがなくなるまで切る。
  * 斧は持ち物の物を使う。なければ、範囲内に作業台があれば作り、作れなければ素手で切る。
  */
-function fellTrees(context, count, { pending, savePending }) {
-  return gatherWood(context, { wanted: Infinity, maxTrees: count, records: [], pending, savePending })
+function fellTrees(context, count) {
+  return gatherWood(context, { wanted: Infinity, maxTrees: count, records: [] })
 }
 
 class SortController {
@@ -47,7 +47,6 @@ class SortController {
    * @param {typeof surveyChests} [options.survey] チェストを調査する関数
    * @param {{ sortOnce: typeof sortOnce, readSourceSignature: typeof readSourceSignature }} [options.sorter] 整理を行うもの
    * @param {number} [options.pollInterval] 指定チェストを確認する間隔（ミリ秒）
-   * @param {typeof replant} [options.replanter] 苗木を植え直す関数
    * @param {typeof fellTrees} [options.feller] 周りの木を指定した本数だけ切る関数
    * @param {string} [options.discardLog] 廃棄を記録するファイル。なければ廃棄しない
    */
@@ -62,12 +61,10 @@ class SortController {
       survey = surveyChests,
       sorter = { sortOnce, readSourceSignature },
       pollInterval = POLL_INTERVAL_MS,
-      replanter = replant,
       feller = fellTrees,
       discardLog
     }
   ) {
-    this.replanter = replanter
     this.feller = feller
     this.discardLog = discardLog
     this.bot = bot
@@ -101,8 +98,6 @@ class SortController {
     switch (command.type) {
       case 'plan':
         return this.plan()
-      case 'replant':
-        return this.replant()
       case 'fell':
         return this.fell(command.count)
       case 'come':
@@ -248,7 +243,6 @@ class SortController {
           const result = await this.sorter.sortOnce({
             ...context,
             saveAssignments: (assignments) => this.store.set(key, { ...this.store.get(key), assignments }),
-            saveReplant: (spots) => this.saveReplant(key, spots),
             notify: this.report,
             discardLog: this.discardLog
           })
@@ -350,58 +344,16 @@ class SortController {
     }
   }
 
-  saveReplant(key, spots) {
-    this.store.set(key, { ...this.store.get(key), replant: spots })
-  }
-
-  // 伐採した場所に苗木を植え直す。結果は、終わり次第 report で知らせる
-  replant() {
-    const key = this.worldKey
-    const world = this.store.get(key)
-    const pending = world.replant ?? []
-    if (pending.length === 0) return [message.failed('植え直し', '植え直す場所がありません')]
-    this.navigator.cancel()
-    const task = { type: 'replant', abort: new AbortController(), busy: true }
-    this.task = task
-    task.done = this.runReplant(key, world, pending, task.abort.signal).finally(() => {
-      this.task = null
-    })
-    return [message.start('植え直し', `${pending.length} か所`, '中止するには sort stop と発言してください')]
-  }
-
-  async runReplant(key, world, pending, signal) {
-    const context = { bot: this.bot, navigator: this.navigator, signal, failed: [] }
-    try {
-      // 苗木をチェストから取り出せるように、指定チェストがあれば中身を調べる
-      let records = []
-      if (world.source) {
-        const found = await this.survey({ ...context, source: world.source.positions, excluded: world.excluded })
-        records = [found.source, ...found.chests]
-      }
-      const result = await this.replanter(context, pending, records)
-      this.saveReplant(key, result.pending)
-      const rest = result.pending.length > 0 ? `苗木がないなどで ${result.pending.length} か所は植えていません` : null
-      this.report(message.done('植え直し', `苗木 ${result.planted} 個`, rest))
-    } catch (err) {
-      // 中止した場合は知らせない。植えた場所は、次の指示で対象から外れる
-      if (signal.aborted) return
-      console.error('植え直しに失敗しました:', err)
-      this.report(message.failed('植え直し', err.message))
-    }
-  }
-
   // 指示を受けた場所を中心に、近い木から指定した本数だけ切る。本数がなければ、切れる木がなくなるか止めるまで切る。
   // 結果は、終わり次第 report で知らせる
   fell(count = null) {
     if (count !== null && (!Number.isInteger(count) || count < 1 || count > TREE_LIMIT)) {
       return [`本数は 1 から ${TREE_LIMIT} で指定してください（省略すると、止めるまで切り続けます）`]
     }
-    const key = this.worldKey
-    const world = this.store.get(key)
     this.navigator.cancel()
     const task = { type: 'fell', abort: new AbortController(), busy: true }
     this.task = task
-    task.done = this.runFell(key, world, count ?? Infinity, task.abort.signal).finally(() => {
+    task.done = this.runFell(count ?? Infinity, task.abort.signal).finally(() => {
       this.task = null
     })
     const center = formatPosition(this.bot.entity.position.floored())
@@ -409,7 +361,7 @@ class SortController {
     return [message.start('伐採', target, '近い木から切ります。中止するには sort stop と発言してください')]
   }
 
-  async runFell(key, world, count, signal) {
+  async runFell(count, signal) {
     // 木を探す範囲は、今いる場所を中心にする（指定チェストの範囲ではない）
     const center = this.bot.entity.position.floored()
     const context = { bot: this.bot, navigator: this.navigator, signal, center, failed: [], notify: this.report }
@@ -417,10 +369,7 @@ class SortController {
     let table
     context.getTable = async () => (table ??= await findTable(context))
     try {
-      const result = await this.feller(context, count, {
-        pending: world.replant ?? [],
-        savePending: (spots) => this.saveReplant(key, spots)
-      })
+      const result = await this.feller(context, count)
       const logs = `原木 ${result.logs} 個${result.remnants > 0 ? `、切り残し ${result.remnants} 本` : ''}`
       const lines = [
         result.trees < count && !(count === Infinity && result.exhausted)
@@ -432,12 +381,9 @@ class SortController {
           : message.done('伐採', `${result.trees} 本`, `${logs}${count === Infinity ? '。周りに切れる木がなくなりました' : ''}`)
       ]
       if (result.barehanded) lines.push('斧を用意できなかったため、素手で切りました')
-      if (result.pending.length > 0) {
-        lines.push(`植え直していない場所が ${result.pending.length} か所あります（植え直すには sort replant と発言してください）`)
-      }
       for (const line of lines) this.report(line)
     } catch (err) {
-      // 中止した場合は知らせない。切った場所は記録してある
+      // 中止した場合は知らせない
       if (signal.aborted) return
       console.error('伐採に失敗しました:', err)
       this.report(message.failed('伐採', err.message))
@@ -458,12 +404,11 @@ class SortController {
   }
 
   status() {
-    const { source, excluded, running, replant: pending = [] } = this.store.get(this.worldKey)
+    const { source, excluded, running } = this.store.get(this.worldKey)
     const sourceText = source ? `${formatChest(source.positions)}${source.auto ? '（自動）' : ''}` : '未登録'
     const activity = this.task ? `${TASK_NAMES[this.task.type]}中` : '待機中'
     const lines = [message.state(activity), `指定チェスト: ${sourceText}${running ? '（整理を開始しています）' : ''}`, `除外したチェスト: ${excluded.length} 個`]
     if (excluded.length > 0) lines[2] += `（${excluded.map(formatChest).join('、')}）`
-    if (pending.length > 0) lines.push(`植え直していない場所: ${pending.length} か所`)
     return lines
   }
 }

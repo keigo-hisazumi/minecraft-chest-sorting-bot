@@ -132,7 +132,6 @@ async function sortOnce({
   navigator,
   world,
   saveAssignments,
-  saveReplant,
   notify = () => {},
   signal,
   build = buildChests,
@@ -142,7 +141,7 @@ async function sortOnce({
   notify(message.start('調査', 'チェストの中身', 'アイテムを移す前に確かめます'))
   const inspect = () => surveyChests({ bot, navigator, source: world.source.positions, excluded: world.excluded, signal })
   let survey = await inspect()
-  const built = await build({ bot, navigator, survey, world, signal, saveReplant, notify })
+  const built = await build({ bot, navigator, survey, world, signal, notify })
   // 材料を取り出したり、チェストを置いたりした場合は、調べ直す
   if (built.changed) survey = await inspect()
   // 荷物として持っている分も、合計に含める

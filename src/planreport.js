@@ -87,12 +87,10 @@ function formatResult(result) {
     tablePlaced = false,
     trees = 0,
     logs = 0,
-    pendingReplant = 0,
     notes = [],
     problems = []
   } = result.build ?? {}
   if (trees > 0) lines.push(message.done('伐採', `${trees} 本`, `原木 ${logs} 個`))
-  if (pendingReplant > 0) lines.push(`植え直していない場所が ${pendingReplant} か所あります（植え直すには sort replant と発言してください）`)
   lines.push(...notes)
   const placed = [
     ...(created > 0 ? [`大きなチェスト ${created} 個`] : []),

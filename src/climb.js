@@ -36,7 +36,7 @@ const REPLACEABLE_PLANTS = [
   'nether_sprouts'
 ]
 // 当たり判定がなく、素手ですぐ刈れる草花。足場を置く場所にあれば、先に刈る（花は置き換わらないため）
-// 苗木は、植え直した物かもしれないため含めない
+// 苗木は、プレイヤーが植えた物かもしれないため含めない
 const PLANTS = new Set([
   ...REPLACEABLE_PLANTS,
   'dandelion',

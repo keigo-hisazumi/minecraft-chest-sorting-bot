@@ -53,17 +53,9 @@ function setup({ bottom = 64, axe = true } = {}) {
   return { context, events }
 }
 
-test('伐採する前に通知し、原木だけを切って、植え直さずに場所を記録する', async () => {
+test('伐採する前に通知し、原木だけを切る', async () => {
   const { context, events } = setup()
-  let saved = null
-  const result = await gatherWood(context, {
-    wanted: 16,
-    records: [],
-    pending: [],
-    savePending: (spots) => {
-      saved = spots
-    }
-  })
+  const result = await gatherWood(context, { wanted: 16, records: [] })
   assert.deepEqual(events, [
     '伐採します: オーク (0, 64, 0)',
     'dig oak_log 64',
@@ -71,7 +63,6 @@ test('伐採する前に通知し、原木だけを切って、植え直さず�
     'dig oak_log 66',
     'dig oak_log 67'
   ])
-  assert.deepEqual(saved, [{ x: 0, y: 64, z: 0, name: 'oak_sapling' }])
   assert.equal(result.trees, 1)
   assert.equal(result.logs, 4)
   assert.ok(result.exhausted)
@@ -79,22 +70,12 @@ test('伐採する前に通知し、原木だけを切って、植え直さず�
 
 test('根元を切ったあとに宙に残った上部も切り、木の本数には数えない', async () => {
   const { context, events } = setup({ bottom: 70 })
-  let saved = null
-  const result = await gatherWood(context, {
-    wanted: 16,
-    records: [],
-    pending: [],
-    savePending: (spots) => {
-      saved = spots
-    }
-  })
+  const result = await gatherWood(context, { wanted: 16, records: [] })
   assert.equal(events[0], '伐採します: オークの切り残し (0, 70, 0)（原木 4 個）')
   assert.ok(events.includes('dig oak_log 73'))
   assert.equal(result.remnants, 1)
   assert.equal(result.trees, 0)
   assert.equal(result.logs, 4)
-  // 植え直す場所は増やさない
-  assert.deepEqual(saved, [])
 })
 
 test('斧を用意できなければ、同じ作業の間は木を切るたびに作り直そうとしない', async () => {
@@ -104,7 +85,7 @@ test('斧を用意できなければ、同じ作業の間は木を切るたび�
     tableLookups++
     return null
   }
-  const result = await gatherWood(context, { wanted: 16, records: [], pending: [], savePending: () => {} })
+  const result = await gatherWood(context, { wanted: 16, records: [] })
   assert.equal(result.logs, 4)
   assert.equal(result.barehanded, true)
   // 作れるかを確かめるのは、はじめの 1 回だけ
