@@ -3,13 +3,13 @@
 // 苗木の植え直しは、指示された場合だけ行う。切った場所は、指示されたときのために記録する。
 
 const { goals } = require('mineflayer-pathfinder')
-const { VERTICAL_RANGE, isInRange, formatPosition } = require('./chests')
-const { message } = require('./messages')
-const { countPlanks, plankValue, planksPerLog, isPlank, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
+const { VERTICAL_RANGE, isInRange } = require('./chests')
+const { formatPosition, message } = require('./messages')
+const { countPlanks, plankValue, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
 const { createMovements } = require('./navigation')
-const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves, isPlacedLeaves } = require('./trees')
+const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves } = require('./trees')
 const { MAX_CLIMB } = require('./climb')
-const { fellTree: fellTree_, digAt, PICKUP, DIG_REACH } = require('./felling')
+const { fellTree: fellTree_, allowLeafBreaking, digAt, PICKUP, DIG_REACH } = require('./felling')
 const { toVec3, toChest, cargoStacks, emptyCargoSlots, refresh, moveStack, hold, release, hotbarSlots, withChest } = require('./window')
 
 const AXES = ['stone_axe', 'wooden_axe']
@@ -25,11 +25,7 @@ const countHeld = (bot, matches) =>
  * 伐採中の移動のルールを作る。道をふさぐ自然の葉だけは壊してよい。足場は置かない
  */
 function createForestryMovements(bot) {
-  const movements = createMovements(bot)
-  movements.canDig = true
-  movements.blocksCantBreak = new Set(bot.registry.blocksArray.filter((b) => !b.name.endsWith('_leaves')).map((b) => b.id))
-  movements.exclusionAreasBreak = [(block) => (isPlacedLeaves(block) ? 100 : 0)]
-  return movements
+  return allowLeafBreaking(createMovements(bot), bot.registry)
 }
 
 /**

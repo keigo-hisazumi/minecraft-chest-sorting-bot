@@ -1,13 +1,13 @@
-// 1 本の木の伐採（採掘 BOT とチェスト整理 BOT で共通）
+// 1 本の木の伐採
 // 地上から届く原木を切り、高い原木は幹の跡に足場を積んで登って切る。
 // それでも残った原木（横に張り出した枝など）は、その原木の真下から足場を積んで切り、原木を残さない。
 // 移動、斧の用意、持ち物の扱いは BOT ごとに違うため、呼び出す側から関数で受け取る。
-// 採掘 BOT（minecraft-mining-bot）の src/felling.js と同じ処理を使う。
+// 採掘 BOT（minecraft-mining-bot）とチェスト整理 BOT（minecraft-chest-sorting-bot）で同じ内容にする。
 
 const { goals } = require('mineflayer-pathfinder')
 const { cutFromTrunk, findPillarSpot } = require('./climb')
 const { formatPosition, message } = require('./messages')
-const { TREE_LABELS } = require('./trees')
+const { TREE_LABELS, isPlacedLeaves } = require('./trees')
 
 // 地上から切りに行く原木の、根元からの高さの上限。これより高い原木は、幹の跡に柱を積んで登って切る
 const GROUND_REACH = 5
@@ -152,4 +152,18 @@ async function fellTree(ops, tree) {
   return { cut, rest, barehanded }
 }
 
-module.exports = { GROUND_REACH, DIG_REACH, PICKUP, fellTree, digAt, collectDrops }
+/**
+ * 移動のルールを、伐採用に変える。道をふさぐ自然の葉だけは壊してよい（置かれた葉は壊さない）
+ *
+ * @param {object} movements mineflayer-pathfinder の移動のルール（BOT ごとの通常のルール）
+ * @param {object} registry bot.registry
+ * @returns {object} 変えた移動のルール（movements と同じもの）
+ */
+function allowLeafBreaking(movements, registry) {
+  movements.canDig = true
+  movements.blocksCantBreak = new Set(registry.blocksArray.filter((b) => !b.name.endsWith('_leaves')).map((b) => b.id))
+  movements.exclusionAreasBreak = [(block) => (isPlacedLeaves(block) ? 100 : 0)]
+  return movements
+}
+
+module.exports = { GROUND_REACH, DIG_REACH, PICKUP, allowLeafBreaking, fellTree, digAt, collectDrops }

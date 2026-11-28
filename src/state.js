@@ -98,13 +98,13 @@ function load(file) {
     text = fs.readFileSync(file, 'utf8')
   } catch (err) {
     if (err.code === 'ENOENT') return {}
-    throw new Error(`登録情報を読み込めません（${file}）: ${err.message}`)
+    throw new Error(`登録情報を読み込めません（${file}）: ${err.message}`, { cause: err })
   }
   let data
   try {
     data = JSON.parse(text)
   } catch (err) {
-    throw new Error(`登録情報が壊れています（${file}）: ${err.message}`)
+    throw new Error(`登録情報が壊れています（${file}）: ${err.message}`, { cause: err })
   }
   const invalid = new Error(`登録情報の形式が正しくありません（${file}）`)
   if (![1, 2, FORMAT_VERSION].includes(data?.version) || typeof data.worlds !== 'object' || data.worlds === null) throw invalid

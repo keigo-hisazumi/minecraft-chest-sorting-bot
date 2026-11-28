@@ -4,8 +4,8 @@
 
 const { goals } = require('mineflayer-pathfinder')
 const { buildChests } = require('./builder')
-const { formatChest, formatPosition, overlaps } = require('./chests')
-const { message } = require('./messages')
+const { formatChest, overlaps } = require('./chests')
+const { formatPosition, message } = require('./messages')
 const { discardOverflow } = require('./discard')
 const { createLayout, destinationFor, movableStacks } = require('./moves')
 const { buildPlan } = require('./plan')

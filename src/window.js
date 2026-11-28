@@ -3,7 +3,8 @@
 
 const { Vec3 } = require('vec3')
 const { goals } = require('mineflayer-pathfinder')
-const { CHEST_NAME, formatPosition } = require('./chests')
+const { CHEST_NAME } = require('./chests')
+const { formatPosition } = require('./messages')
 const { describeItem } = require('./items')
 const { REACH } = require('./survey')
 

@@ -225,6 +225,22 @@ iOS でホーム画面に追加して開いたとき（PWA）に、ステータ�
 - 他のアプリや別のリポジトリの画像を URL で参照しない。各アプリのリポジトリに置くことで、オフラインでも表示でき、PR プレビューも単独で動く
 - Vite の雛形が作る `vite.svg` や `src/assets/react.svg` / `vue.svg` など、使っていない画像は残さない
 
+## 採掘 BOT とチェスト整理 BOT で共通のファイル
+
+採掘 BOT（[minecraft-mining-bot](https://github.com/keigo-hisazumi/minecraft-mining-bot)）とチェスト整理 BOT（[minecraft-chest-sorting-bot](https://github.com/keigo-hisazumi/minecraft-chest-sorting-bot)）は、次のファイルを両方のリポジトリで同じ内容にします。片方を変えたら、もう片方にも同じ変更を入れた PR を作り、続けてマージします。
+
+| 種類 | ファイル |
+| --- | --- |
+| 共通の処理 | `src/climb.js` / `src/escape.js` / `src/felling.js` / `src/messages.js` / `src/stall.js` / `src/trees.js` |
+| 共通の処理のテスト | `src/climb.test.js` / `src/escape.test.js` / `src/messages.test.js` / `src/stall.test.js` / `src/trees.test.js` |
+| ドキュメント | `docs/messages.md` / `AGENTS.md` / `CLAUDE.md` / `CONTRIBUTING.md` / `SECURITY.md` |
+| 設定 | `eslint.config.js` / `.editorconfig` / `.gitattributes` / `.gitignore` / `.markdownlint-cli2.jsonc` / `.vscode/` / `scripts/check-syntax.js` |
+| GitHub | `.github/` の全ファイル（ワークフロー・テンプレート・設定） |
+
+- 共通の処理のファイルは、先頭のコメントに「採掘 BOT（minecraft-mining-bot）とチェスト整理 BOT（minecraft-chest-sorting-bot）で同じ内容にする。」と書く
+- 共通の処理は、BOT ごとに違う部分（移動のルール、斧やブロックの用意、持ち物の扱いなど）を引数の関数で受け取り、ファイルの中で BOT の種類を見分けない
+- 同じ内容かどうかは、両方のリポジトリを並べて `diff -r` などで確かめる
+
 ## セキュリティ
 
 ### GitHub Actions

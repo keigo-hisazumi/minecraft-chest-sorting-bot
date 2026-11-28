@@ -138,6 +138,7 @@
 - mineflayer（Minecraft BOT ライブラリ）
 - mineflayer-pathfinder（経路探索と移動）
 - vec3（座標計算）
+- ESLint（コードの検査）
 
 ## 開発
 
@@ -151,6 +152,7 @@
 ```bash
 npm ci          # 依存関係のインストール
 npm start       # BOT を起動する
+npm run lint    # ESLint で検査する
 npm test        # テストを実行する
 npm run build   # src/ と scripts/ の構文を検査する
 ```
@@ -166,6 +168,8 @@ npm run build   # src/ と scripts/ の構文を検査する
 │   ├── controller.js     # コマンドの実行
 │   ├── chests.js         # チェストの判定と検索
 │   ├── navigation.js     # BOT の移動
+│   ├── stall.js          # 移動が止まったときの立て直し（採掘 BOT と共通）
+│   ├── messages.js       # チャットへ出すメッセージ（採掘 BOT と共通）
 │   ├── escape.js         # 動けなくなったときの脱出（採掘 BOT と共通）
 │   ├── survey.js         # チェストの中身の調査
 │   ├── items.js          # 保護対象の判定
@@ -182,13 +186,14 @@ npm run build   # src/ と scripts/ の構文を検査する
 │   ├── forester.js       # 伐採と植え直し
 │   ├── felling.js        # 1 本の木の伐採（採掘 BOT と共通）
 │   ├── climb.js          # 足場を積んで登る処理（採掘 BOT と共通）
-│   ├── trees.js          # 自然の木の判定
+│   ├── trees.js          # 自然の木の判定（採掘 BOT と共通）
 │   ├── window.js         # チェストや作業台の画面の操作
 │   └── state.js          # 登録情報の保存
 ├── scripts/
 │   └── check-syntax.js   # 構文検査（CI の build で実行）
 ├── docs/
-│   └── spec.md           # 仕様書
+│   ├── spec.md           # 仕様書
+│   └── messages.md       # チャットのメッセージの書き方（採掘 BOT と共通）
 └── .env.example          # 接続設定の雛形
 ```
 

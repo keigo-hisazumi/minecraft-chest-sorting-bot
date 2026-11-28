@@ -1,24 +1,14 @@
 // BOT の移動
 
 const { Movements, goals } = require('mineflayer-pathfinder')
-const { Vec3 } = require('vec3')
 const { allowPlantReplacement, escape } = require('./escape')
 const { message } = require('./messages')
+const { MAX_ATTEMPTS, STALLED_MESSAGE, STALL_MS, recenter, watchStall } = require('./stall')
 
 // プレイヤーから、この距離（ブロック）まで近づいたら到着とする
 const NEAR_DISTANCE = 1
 // 1 回の移動にかける時間の上限（ミリ秒）
 const MOVE_TIMEOUT_MS = 60000
-// 経路に沿って動いているのに、この時間（ミリ秒）ほとんど動かなければ、止まったとみなす
-const STALL_MS = 3000
-// 止まったとみなす移動量（ブロック）
-const STALL_DISTANCE = 0.05
-// 動いたかを確かめる間隔（ミリ秒）
-const POLL_MS = 250
-// 止まったときに移動をやり直す最大の回数（最初の 1 回を含む）
-const MAX_ATTEMPTS = 3
-// ブロックの中央へ寄る処理の制限時間（ミリ秒）
-const CENTER_TIMEOUT_MS = 1500
 
 /**
  * 移動のルールを作る。移動中は、ブロックの破壊と足場の設置をしない
@@ -41,33 +31,6 @@ function createMovements(bot) {
   if (cactus) movements.blocksToAvoid.add(cactus.id)
   // 草の上にも足場を置けるものとする（採掘 BOT と同じ）
   return allowPlantReplacement(movements, bot.registry)
-}
-
-/**
- * 今いるブロックの中央へ、経路探索を使わずに寄る
- * 体がブロックの角や縁にまたがっていると、段差のジャンプが壁に当たって登れなくなる。
- * 中央に戻してから、経路探索をやり直す。
- *
- * @param {import('mineflayer').Bot} bot
- */
-async function centerOnBlock(bot) {
-  const p = bot.entity.position
-  const center = new Vec3(Math.floor(p.x) + 0.5, p.y, Math.floor(p.z) + 0.5)
-  const deadline = Date.now() + CENTER_TIMEOUT_MS
-  bot.clearControlStates()
-  await bot.waitForTicks(2)
-  try {
-    while (Date.now() < deadline) {
-      const now = bot.entity.position
-      if (Math.hypot(center.x - now.x, center.z - now.z) < 0.15) break
-      await bot.lookAt(new Vec3(center.x, now.y + bot.entity.height, center.z), true)
-      bot.setControlState('forward', true)
-      await bot.waitForTicks(1)
-    }
-  } finally {
-    bot.setControlState('forward', false)
-  }
-  await bot.waitForTicks(2)
 }
 
 class Navigator {
@@ -99,7 +62,7 @@ class Navigator {
   /**
    * 目標の場所へ移動する
    * 経路に沿って動いているのに止まってしまった（体が斜めになって段差を登れないなど）ときは、
-   * 体をブロックの中央に戻して、やり直す。通常の goto は、この状態で成功も失敗もせずに待ち続けるため。
+   * 体をブロックの中央に戻して、やり直す（stall.js）。通常の goto は、この状態で成功も失敗もせずに待ち続けるため。
    * それでも着けなければ、穴から登るなどして抜け出し（escape.js）、もう一度やり直す。
    *
    * @param {import('mineflayer-pathfinder').goals.Goal} goal 目標
@@ -129,7 +92,7 @@ class Navigator {
 
   // 移動して、着いたかを確かめる。止まったら、体を中央に戻してやり直す。stalled は、経路の途中で止まったことがあるか
   async #move(goal, movementsFactory, generation, deadline) {
-    let failure = null
+    let failure
     let stalledOnce = false
     try {
       this.bot.pathfinder.setMovements(movementsFactory(this.bot))
@@ -142,10 +105,10 @@ class Navigator {
         }
         stalledOnce = true
         if (attempt >= this.attempts || Date.now() >= deadline) {
-          failure = new Error('移動の途中で動けなくなりました')
+          failure = new Error(STALLED_MESSAGE)
           break
         }
-        await centerOnBlock(this.bot)
+        await recenter(this.bot)
         if (generation !== this.generation) return { status: 'cancelled' }
       }
     } catch (err) {
@@ -167,22 +130,7 @@ class Navigator {
    */
   async #attempt(goal, timeout) {
     const { bot } = this
-    let stalled = false
-    let last = bot.entity.position.clone()
-    let since = Date.now()
-    const watch = setInterval(() => {
-      const p = bot.entity.position
-      // 経路を探している間は止まっていて当然なので、動く経路があるときだけ数える
-      if (!bot.pathfinder.isMoving?.() || p.distanceTo(last) > STALL_DISTANCE) {
-        last = p.clone()
-        since = Date.now()
-        return
-      }
-      if (Date.now() - since >= this.stallMs && !goal.isEnd(p.floored())) {
-        stalled = true
-        bot.pathfinder.stop()
-      }
-    }, POLL_MS)
+    const watch = watchStall(bot, goal, this.stallMs)
     let timer
     try {
       await Promise.race([
@@ -191,11 +139,11 @@ class Navigator {
           timer = setTimeout(() => reject(new Error('時間内に着けませんでした')), Math.max(0, timeout))
         })
       ])
-      return { stalled, error: null }
+      return { stalled: watch.stalled, error: null }
     } catch (err) {
-      return { stalled, error: err }
+      return { stalled: watch.stalled, error: err }
     } finally {
-      clearInterval(watch)
+      watch.stop()
       clearTimeout(timer)
     }
   }
@@ -226,4 +174,4 @@ class Navigator {
   }
 }
 
-module.exports = { Navigator, createMovements, centerOnBlock }
+module.exports = { Navigator, createMovements }

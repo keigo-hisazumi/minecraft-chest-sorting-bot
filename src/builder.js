@@ -3,8 +3,8 @@
 // 材料が足りなければ、範囲内の木を伐採する。
 
 const { goals } = require('mineflayer-pathfinder')
-const { CHEST_NAME, chestPositions, isInRange, overlaps, formatPosition } = require('./chests')
-const { message } = require('./messages')
+const { CHEST_NAME, chestPositions, isInRange, overlaps } = require('./chests')
+const { formatPosition, message } = require('./messages')
 const { countPlanks, plankValue, isPlank, planksPerLog, craftPlanks, craftTable, craftChests } = require('./crafting')
 const { gatherWood, findTrees } = require('./forester')
 const { buildPlan } = require('./plan')
