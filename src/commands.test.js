@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const { parseCommand } = require('./commands')
 
 test('引数のないコマンドを解釈する', () => {
-  for (const type of ['start', 'stop', 'status', 'plan', 'replant', 'come', 'pos']) {
+  for (const type of ['start', 'stop', 'status', 'plan', 'come', 'pos']) {
     assert.deepEqual(parseCommand(`sort ${type}`), { type })
   }
 })

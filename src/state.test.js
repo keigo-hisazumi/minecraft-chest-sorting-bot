@@ -18,15 +18,12 @@ const world = {
   assignments: { dedicated: { stone: [{ x: 7, y: 8, z: 9 }] }, mixed: [[{ x: 1, y: 1, z: 1 }]], protected: [] }
 }
 
-test('苗木を植え直す場所を保存する。ない登録も読み込める', (t) => {
+test('以前の版で保存した、苗木を植え直す場所は読み捨てる', (t) => {
   const file = temporaryFile(t)
-  const store = new StateStore(file)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
   const replant = [{ x: 1, y: 2, z: 3, name: 'oak_sapling' }]
-  store.set('a', { ...world, replant })
-  store.set('b', world)
-  const reloaded = new StateStore(file)
-  assert.deepEqual(reloaded.get('a').replant, replant)
-  assert.equal(reloaded.get('b').replant, undefined)
+  fs.writeFileSync(file, JSON.stringify({ version: 3, worlds: { a: { ...world, replant } } }))
+  assert.deepEqual(new StateStore(file).get('a'), world)
 })
 
 test('版 2 の登録は、振り分け先を引き継ぎ、開始の状態だけを停止にする', (t) => {

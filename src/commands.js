@@ -2,9 +2,9 @@
 // 他の BOT と衝突しないように、すべて `sort` で始める。
 
 const HELP =
-  '使い方: sort start / sort stop / sort status / sort plan / sort replant / sort fell [本数] / sort come / sort pos / sort chest <x> <y> <z> / sort exclude <x> <y> <z>'
+  '使い方: sort start / sort stop / sort status / sort plan / sort fell [本数] / sort come / sort pos / sort chest <x> <y> <z> / sort exclude <x> <y> <z>'
 
-const SIMPLE_COMMANDS = new Set(['start', 'stop', 'status', 'plan', 'replant', 'come', 'pos'])
+const SIMPLE_COMMANDS = new Set(['start', 'stop', 'status', 'plan', 'come', 'pos'])
 const POSITION_COMMANDS = new Set(['chest', 'exclude'])
 // 本数を 1 つ取るコマンド（本数は省略できる）
 const COUNT_COMMANDS = new Set(['fell'])

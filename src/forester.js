@@ -1,15 +1,14 @@
-// 伐採と植え直し
-// 範囲内の自然の木を切って原木を集める。斧は、木の斧と石の斧だけを使う。
-// 苗木の植え直しは、指示された場合だけ行う。切った場所は、指示されたときのために記録する。
+// 伐採
+// 範囲内の自然の木を切って原木を集める。斧は、木の斧と石の斧だけを使う。苗木は植え直さない。
 
 const { goals } = require('mineflayer-pathfinder')
 const { VERTICAL_RANGE, isInRange } = require('./chests')
 const { formatPosition, message } = require('./messages')
 const { countPlanks, plankValue, isAxeStone, craftPlanks, craftSticks, craftAxe } = require('./crafting')
 const { createMovements } = require('./navigation')
-const { TREE_LABELS, LOG_NAMES, SOIL, analyzeTree, analyzeRemnant, isNaturalLeaves } = require('./trees')
+const { TREE_LABELS, LOG_NAMES, analyzeTree, analyzeRemnant } = require('./trees')
 const { MAX_CLIMB } = require('./climb')
-const { fellTree: fellTree_, allowLeafBreaking, digAt, PICKUP, DIG_REACH } = require('./felling')
+const { fellTree: fellTree_, allowLeafBreaking, PICKUP, DIG_REACH } = require('./felling')
 const { toVec3, toChest, cargoStacks, emptyCargoSlots, refresh, moveStack, hold, release, hotbarSlots, withChest } = require('./window')
 
 const AXES = ['stone_axe', 'wooden_axe']
@@ -178,72 +177,6 @@ async function fellTree(context, tree, records) {
 
 
 /**
- * 苗木を植え直す。指示された場合だけ呼び出す
- *
- * @param {object} context
- * @param {Array<{ x: number, y: number, z: number, name: string }>} pending 植え直す場所と苗木
- * @param {Array<object>} records チェストの中身。苗木がなければ取り出す
- * @returns {Promise<{ planted: number, pending: object[] }>} 植えた数と、まだ植えていない場所
- */
-async function replant(context, pending, records) {
-  const { bot, navigator, signal } = context
-  const rest = []
-  let planted = 0
-  try {
-    for (const [index, spot] of pending.entries()) {
-      signal.throwIfAborted()
-      const cell = toVec3(spot)
-      const floor = bot.blockAt(cell.offset(0, -1, 0))
-      let block = bot.blockAt(cell)
-      // 読み込まれていない場所は、後で植える
-      if (!block || !floor) {
-        rest.push(spot)
-        continue
-      }
-      // すでに植わっているか、地面でなくなった場所は、植え直さない
-      if (block.name === spot.name || !SOIL.has(floor.name)) continue
-      if (isNaturalLeaves(block)) {
-        await digAt(forestryOps(context, records), cell, block.name)
-        block = bot.blockAt(cell)
-      }
-      if (block.boundingBox !== 'empty') continue
-      const sapling = (s) => s.name === spot.name && !s.protected
-      if (countHeld(bot, sapling) === 0) {
-        await withdraw(context, records, sapling, pending.slice(index).filter((p) => p.name === spot.name).length)
-      }
-      if (!(await hold(bot, spot.name))) {
-        rest.push(spot)
-        continue
-      }
-      // 植える場所には立たない
-      const goal = new goals.GoalCompositeAll([
-        new goals.GoalNear(cell.x, cell.y, cell.z, 3),
-        new goals.GoalInvert(new goals.GoalNear(cell.x, cell.y, cell.z, 1))
-      ])
-      await navigator.moveTo(goal, createForestryMovements)
-      signal.throwIfAborted()
-      if (!(await hold(bot, spot.name))) {
-        rest.push(spot)
-        continue
-      }
-      try {
-        await bot.placeBlock(bot.blockAt(cell.offset(0, -1, 0)), cell.minus(floor.position))
-      } catch (err) {
-        console.error(`${formatPosition(cell)} に苗木を植えられませんでした:`, err.message)
-        signal.throwIfAborted()
-      }
-      await bot.waitForTicks(5)
-      if (bot.blockAt(cell)?.name === spot.name) planted++
-      else rest.push(spot)
-    }
-  } finally {
-    await release(bot, (item) => item.name.endsWith('_sapling')).catch((err) => console.error('苗木を戻せませんでした:', err.message))
-  }
-  return { planted, pending: rest }
-}
-
-
-/**
  * 手持ちの木材が、板材に換算して必要な数になるまで伐採する
  *
  * @param {object} context bot、navigator、signal、center、failed と、作業台を返す getTable、通知する notify
@@ -251,15 +184,13 @@ async function replant(context, pending, records) {
  * @param {number} options.wanted 必要な板材の数
  * @param {Array<object>} options.records チェストの中身
  * @param {number} [options.maxTrees] 切る木の本数の上限（既定は TREE_LIMIT。Infinity なら、切れる木がなくなるまで切る）
- * @param {Array<object>} options.pending 植え直していない場所
- * @param {(pending: Array<object>) => void} options.savePending 植え直していない場所を保存する関数
- * @returns {Promise<{ trees: number, remnants: number, logs: number, pending: object[], exhausted: boolean, barehanded: boolean }>}
+ * @returns {Promise<{ trees: number, remnants: number, logs: number, exhausted: boolean, barehanded: boolean }>}
  *   remnants は切った切り残し（根元を切ったあとに上部が残った木）の数で、trees には含めない
  *   exhausted は、必要な数が揃う前に切れる木がなくなったことを表す
  */
-async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pending, savePending }) {
+async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT }) {
   const { bot, signal, notify } = context
-  const result = { trees: 0, remnants: 0, logs: 0, pending, exhausted: false, barehanded: false }
+  const result = { trees: 0, remnants: 0, logs: 0, exhausted: false, barehanded: false }
   const skipped = new Set()
   // 伐採を始める前から空いている枠には、拾ったアイテムが入る
   const emptyBefore = new Set(hotbarSlots(bot.inventory).filter((slot) => !bot.inventory.slots[slot]))
@@ -275,19 +206,9 @@ async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pen
     skipped.add(tree.base[0].toString())
     const label = `${TREE_LABELS[tree.type]}${tree.remnant ? 'の切り残し' : ''}`
     notify(message.start('伐採', `${label} ${formatPosition(tree.base[0])}`, tree.remnant ? `原木 ${tree.logs.length} 個` : null))
-    // 切る前に植え直す場所を保存して、中断しても忘れないようにする（切り残しは、根元をもう切ってある）
-    const spots = tree.remnant ? [] : tree.base.map(({ x, y, z }) => ({ x, y, z, name: `${tree.type}_sapling` }))
-    const fresh = spots.filter((s) => !result.pending.some((p) => p.x === s.x && p.y === s.y && p.z === s.z))
-    result.pending = [...result.pending, ...fresh]
-    savePending(result.pending)
     const cut = await fellTree(context, tree, records)
     await stow()
-    if (cut === 0) {
-      // 1 本も切れなければ、植え直す必要はない
-      result.pending = result.pending.filter((p) => !fresh.includes(p))
-      savePending(result.pending)
-      continue
-    }
+    if (cut === 0) continue
     // 切り残しは、切った木の本数に数えない
     if (tree.remnant) result.remnants++
     else result.trees++
@@ -297,4 +218,4 @@ async function gatherWood(context, { wanted, records, maxTrees = TREE_LIMIT, pen
   return result
 }
 
-module.exports = { TREE_LIMIT, gatherWood, replant, findTrees, createForestryMovements }
+module.exports = { TREE_LIMIT, gatherWood, findTrees, createForestryMovements }

@@ -157,7 +157,7 @@ function affordable(chestItems, expansions, newChests) {
 }
 
 /**
- * 必要なチェストを作って置く。苗木の植え直しはしない
+ * 必要なチェストを作って置く
  *
  * @param {object} options
  * @param {import('mineflayer').Bot} options.bot
@@ -165,13 +165,12 @@ function affordable(chestItems, expansions, newChests) {
  * @param {object} options.survey 調査の結果
  * @param {object} options.world 登録情報
  * @param {AbortSignal} options.signal 中止の合図
- * @param {(pending: Array<object>) => void} [options.saveReplant] 植え直していない場所を保存する関数
  * @param {(message: string) => void} [options.notify] 伐採とクラフトを始めるときの通知先
  * @returns {Promise<{ changed: boolean, expanded: number, created: number, tablePlaced: boolean,
- *   trees: number, logs: number, pendingReplant: number, notes: string[], problems: string[] }>}
+ *   trees: number, logs: number, notes: string[], problems: string[] }>}
  *   changed が true の場合は、調査し直す必要がある
  */
-async function buildChests({ bot, navigator, survey, world, signal, saveReplant = () => {}, notify = () => {} }) {
+async function buildChests({ bot, navigator, survey, world, signal, notify = () => {} }) {
   const center = world.source.positions[0]
   const context = { bot, navigator, signal, center, notify, failed: [] }
   const result = {
@@ -181,7 +180,6 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
     tablePlaced: false,
     trees: 0,
     logs: 0,
-    pendingReplant: (world.replant ?? []).length,
     notes: [],
     problems: []
   }
@@ -232,12 +230,8 @@ async function buildChests({ bot, navigator, survey, world, signal, saveReplant 
       await withdrawMaterials(context, records, planksFor(wantedItems))
     }
     if (heldValue() < planksFor(wantedItems)) {
-      const savePending = (next) => {
-        result.pendingReplant = next.length
-        saveReplant(next)
-      }
       notify(message.start('伐採', 'チェストの材料', `板材 ${planksFor(wantedItems) - heldValue()} 枚分`))
-      const gathered = await gatherWood(context, { wanted: planksFor(wantedItems), records, pending: world.replant ?? [], savePending })
+      const gathered = await gatherWood(context, { wanted: planksFor(wantedItems), records })
       result.trees = gathered.trees
       result.logs = gathered.logs
       if (gathered.trees > 0) result.changed = true

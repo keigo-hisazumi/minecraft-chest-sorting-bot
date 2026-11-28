@@ -37,16 +37,20 @@ const isAssignments = (a) =>
   Object.values(a.dedicated).every((positions) => positions === null || isPositions(positions)) &&
   isPositionsList(a.mixed) &&
   isPositionsList(a.protected)
-// 苗木を植え直す場所。伐採を始める前の版で保存した内容にはない
-const isReplant = (list) => list === undefined || (Array.isArray(list) && list.every((s) => isPosition(s) && typeof s.name === 'string'))
 const isWorld = (w) =>
   (w?.source === null || (isPositions(w?.source?.positions) && typeof w.source.auto === 'boolean')) &&
   isPositionsList(w.excluded) &&
   typeof w.running === 'boolean' &&
-  isAssignments(w.assignments) &&
-  isReplant(w.replant)
+  isAssignments(w.assignments)
 
 // 以前の版の開始の状態は、今の版の動作（廃棄を含む）を指示したものではないため、引き継がずに停止にする
+// 以前の版で保存した、苗木を植え直す場所（植え直しの機能はなくした）は読み捨てる
+const withoutReplant = (world) => {
+  const copy = { ...world }
+  delete copy.replant
+  return copy
+}
+
 const upgrade = (version, world) => ({ ...world, running: false, ...(version === 1 && { assignments: emptyAssignments() }) })
 
 /**
@@ -110,7 +114,7 @@ function load(file) {
   if (![1, 2, FORMAT_VERSION].includes(data?.version) || typeof data.worlds !== 'object' || data.worlds === null) throw invalid
   const entries = Object.entries(data.worlds)
   const old = data.version !== FORMAT_VERSION
-  const worlds = Object.fromEntries(old ? entries.map(([key, world]) => [key, upgrade(data.version, world)]) : entries)
+  const worlds = Object.fromEntries(entries.map(([key, world]) => [key, withoutReplant(old ? upgrade(data.version, world) : world)]))
   if (!Object.values(worlds).every(isWorld)) throw invalid
   return worlds
 }
