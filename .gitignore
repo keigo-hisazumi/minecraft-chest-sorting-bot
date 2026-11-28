@@ -68,7 +68,7 @@ __screenshots__/
 .vercel
 .wrangler
 
-# BOT が保存する登録情報
+# BOT が保存するデータ（掘削の記録・登録情報など）
 data/
 
 # アプリのアイコン（public/icon.svg から npm run icons で生成する。AGENTS.md「アプリのアイコン」参照）

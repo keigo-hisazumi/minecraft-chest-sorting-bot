@@ -1,5 +1,6 @@
 // 自然の木の判定
 // 建築物の原木を壊さないように、自然に生えた形と言い切れる木だけを対象にする。ブロックを参照するだけで、操作はしない。
+// 採掘 BOT（minecraft-mining-bot）とチェスト整理 BOT（minecraft-chest-sorting-bot）で同じ内容にする。
 
 const { Vec3 } = require('vec3')
 

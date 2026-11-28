@@ -1,6 +1,6 @@
 // チャットへ出すメッセージ
-// 採掘 BOT とチェスト整理 BOT で、メッセージの書き方と出し方をそろえる（両方のリポジトリで同じ内容にする）。
-// 書き方の決まりは docs/messages.md を参照する。
+// 採掘 BOT とチェスト整理 BOT で、メッセージの書き方と出し方をそろえる。書き方の決まりは docs/messages.md を参照する。
+// 採掘 BOT（minecraft-mining-bot）とチェスト整理 BOT（minecraft-chest-sorting-bot）で同じ内容にする。
 
 // 発言の間隔（ミリ秒）。続けて発言すると、サーバーに切断されることがあるため、間を空ける
 const CHAT_INTERVAL_MS = 1000

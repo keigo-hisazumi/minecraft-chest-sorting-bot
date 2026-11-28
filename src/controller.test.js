@@ -342,7 +342,7 @@ test('再起動後は、開始の状態なら整理を再開する', async (t) =
 const spots = [{ x: 7, y: 64, z: 0, name: 'oak_sapling' }]
 
 test('整理や再起動では植え直さず、指示した場合だけ植え直す', async (t) => {
-  const { sorting, run, stop, controller, boot, state, replants, reports } = started(t)
+  const { sorting, run, controller, boot, state, replants, reports } = started(t)
   await until(() => sorting.runs.length === 1)
   sorting.runs[0].saveReplant(spots)
   sorting.signature = 'b'

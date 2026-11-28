@@ -4,7 +4,7 @@
 //   積むブロックがなければ、自然の地形のブロックを掘って段を作り、登る
 // - 穴の中でなく、経路の途中で引っかかって止まったのなら、隣の空いているマスへ 1 歩よける
 // 移動に失敗したら、これを行ってから移動をやり直す。
-// 採掘 BOT（minecraft-mining-bot）の src/escape.js と同じ処理を使う。
+// 採掘 BOT（minecraft-mining-bot）とチェスト整理 BOT（minecraft-chest-sorting-bot）で同じ内容にする。
 
 const { Vec3 } = require('vec3')
 const { REPLACEABLE_PLANTS, centerOnBlock, clearPlant, isAir, isPlant, towerUp } = require('./climb')

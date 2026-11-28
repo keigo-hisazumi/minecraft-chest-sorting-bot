@@ -3,7 +3,8 @@
 
 const { Vec3 } = require('vec3')
 const { goals } = require('mineflayer-pathfinder')
-const { CHEST_NAME, chestPositions, findChests, overlaps, formatPosition } = require('./chests')
+const { CHEST_NAME, chestPositions, findChests, overlaps } = require('./chests')
+const { formatPosition } = require('./messages')
 const { describeItem } = require('./items')
 
 // チェストを開くときに手が届く距離（ブロック）

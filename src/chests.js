@@ -124,7 +124,6 @@ module.exports = {
   CHEST_NAME,
   HORIZONTAL_RANGE,
   VERTICAL_RANGE,
-  formatPosition,
   formatChest,
   samePosition,
   overlaps,

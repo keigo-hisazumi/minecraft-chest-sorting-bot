@@ -1,7 +1,7 @@
 // 振り分けの計画を、チャット向けの要約と、ファイル向けの詳細な文にする
 
-const { formatPosition, formatChest } = require('./chests')
-const { message } = require('./messages')
+const { formatChest } = require('./chests')
+const { formatPosition, message } = require('./messages')
 
 // チャットに名前を並べる件数の上限（発言が多いと、サーバーに切断されるため要約する）
 const CHAT_LIST_LIMIT = 3

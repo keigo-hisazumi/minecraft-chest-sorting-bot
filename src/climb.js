@@ -1,7 +1,7 @@
 // 大きな木の伐採（幹の柱を登って切る）
 // 地上から手が届かない高い原木は、切り終えた幹の跡にブロックを積んで登り、手の届く原木から切る。
 // 積んだブロックは、切り終えたら上から順に掘って降り、跡に残さない。
-// 採掘 BOT（minecraft-mining-bot）の src/climb.js と同じ処理を使う。
+// 採掘 BOT（minecraft-mining-bot）とチェスト整理 BOT（minecraft-chest-sorting-bot）で同じ内容にする。
 
 const { Vec3 } = require('vec3')
 const { isNaturalLeaves } = require('./trees')
